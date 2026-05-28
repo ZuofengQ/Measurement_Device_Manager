@@ -1,0 +1,23 @@
+function saved = example_scope_rigol_timed()
+outputFolder = setup_example_environment();
+labdevices.core.resetVisaConnections('TCPIP::192.168.1.49::INSTR');
+
+scope = labdevices.scope.RigolDHO4204();
+scope.connect();
+cleanupObj = onCleanup(@() scope.disconnect()); %#ok<NASGU>
+
+data = scope.acquireTimed([1 2], 1e6, 0.1, ...
+    'ChannelScaleVdiv', struct('ch1', 0.2, 'ch2', 0.1), ...
+    'ChannelOffsetV', struct('ch1', 0.0, 'ch2', 0.0), ...
+    'TriggerSource', 'CHAN1', ...
+    'TriggerSlope', 'POS', ...
+    'TriggerLevelV', 0.0, ...
+    'ChunkPoints', 5e5);
+
+saved = scope.saveData(data, 'Folder', outputFolder, 'Formats', {'mat', 'csv'});
+% 手动命名时改用：
+% saved = scope.saveData(data, 'Folder', outputFolder, ...
+%     'BaseName', 'rigol_timed_capture_10s', 'Formats', {'mat', 'csv'});
+
+disp(saved);
+end

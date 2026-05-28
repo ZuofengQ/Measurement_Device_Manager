@@ -1,0 +1,18 @@
+# 数据输出目录
+output/
+
+# 临时文件
+_tmp_*/
+.remember/
+
+# MATLAB 缓存
+*.m~
+*.asv
+
+# 配置文件（含本地路径）
+app_config.mat
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace

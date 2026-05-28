@@ -1,0 +1,26 @@
+function saved = example_scope_keysight_mso9404a()
+outputFolder = setup_example_environment();
+labdevices.core.resetVisaConnections('TCPIP0::192.168.1.25::inst0::INSTR');
+
+scope = labdevices.scope.KeysightMSO9404A();
+scope.connect();
+cleanupObj = onCleanup(@() scope.disconnect()); %#ok<NASGU>
+
+scope.configure( ...
+    'TimeRangeS', 10e-6, ...
+    'Points', 2000, ...
+    'SampleRateHz', 2e9, ...
+    'AverageCount', 1, ...
+    'ChannelDisplay', struct('ch1', 1), ...
+    'TriggerSource', 'CHANNEL1', ...
+    'TriggerSlope', 'POS');
+
+data = scope.acquire(1);
+
+saved = scope.saveData(data, 'Folder', outputFolder, 'Formats', {'mat', 'csv', 'png'});
+% 手动命名时改用：
+% saved = scope.saveData(data, 'Folder', outputFolder, ...
+%     'BaseName', 'keysight_scope_ch1', 'Formats', {'mat', 'csv', 'png'});
+
+disp(saved);
+end
