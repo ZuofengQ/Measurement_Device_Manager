@@ -331,7 +331,7 @@ classdef MeasurementManagerApp < handle
             saveSelectedButton.Layout.Row = 4;
             saveSelectedButton.Layout.Column = 3;
             clearMemButton.Layout.Row = 4;
-            clearMemButton.Layout.Column = 5;
+            clearMemButton.Layout.Column = 4;
         end
 
         function buildElogPanel(obj, parent)
@@ -676,7 +676,11 @@ classdef MeasurementManagerApp < handle
             end
 
             obj.SelectedKey = key;
-            obj.TabGroup.SelectedTab = obj.TabGroup.Children(2);
+            for t = 1:numel(obj.TabGroup.Children)
+                if strcmp(obj.TabGroup.Children(t).Title, 'Parameters')
+                    obj.TabGroup.SelectedTab = obj.TabGroup.Children(t); break;
+                end
+            end
             obj.refreshParameterPanel(obj.SelectedKey);
             obj.logMessage(sprintf("Selected: %s", obj.SelectedKey), "info");
         end
@@ -713,16 +717,18 @@ classdef MeasurementManagerApp < handle
             if isempty(connected); obj.logMessage("No instruments connected.", "warn"); return; end
 
             obj.setBusy(true);
-            obj.logMessage(sprintf("Acquiring all (%d instruments)...", numel(connected)), "info");
+            total = numel(connected);
+            obj.logMessage(sprintf("Acquiring all (%d instruments)...", total), "info");
             try
                 results = obj.Station.acquireAll([], obj.AcquireParamsMap);
                 resultKeys = results.keys();
                 for i = 1:numel(resultKeys)
                     k = resultKeys{i};
+                    obj.logMessage(sprintf("[%d/%d] Processing: %s", i, numel(resultKeys), k), "info");
                     obj.onAcquireDone(k, results(k));
                 end
                 obj.logMessage(sprintf("AcquireAll complete: %d/%d succeeded.", ...
-                    results.Count, numel(connected)), "info");
+                    results.Count, total), "info");
             catch ME
                 obj.logMessage(sprintf("AcquireAll error: %s", ME.message), "error");
             end
@@ -820,12 +826,15 @@ classdef MeasurementManagerApp < handle
                 deviceName, nTraces, timestamp), "info");
             obj.updateStatusBar();
 
-            obj.plotAcquisitionData(char(key), data);
+            try
+                obj.plotAcquisitionData(char(key), data);
+            catch ME
+                obj.logMessage(sprintf("Plot failed (%s): %s", key, ME.message), "error");
+            end
 
             if obj.AutoSaveCheck.Value
                 try; obj.doSave(data, key); catch ME;
                     obj.logMessage(sprintf("Auto-save failed: %s", ME.message), "error");
-                    obj.logMessage(sprintf("  stack: %s:%d", ME.stack(1).name, ME.stack(1).line), "error");
                 end
             end
         end
@@ -994,6 +1003,7 @@ classdef MeasurementManagerApp < handle
         function args = buildAcquireArgs(obj, key, acquireArgsCell)
             registry = labdevices.core.InstrumentRegistry.all();
             k = char(key);
+            if ~isfield(registry, k); args = {}; return; end
             instrType = registry.(k).type;
 
             switch upper(instrType)
@@ -1053,13 +1063,14 @@ classdef MeasurementManagerApp < handle
             if isempty(obj.AcquisitionStore)
                 obj.logMessage("No data to save.", "warn"); return;
             end
-            for i = 1:numel(obj.AcquisitionStore)
+            total = numel(obj.AcquisitionStore);
+            for i = 1:total
                 try
                     entry = obj.AcquisitionStore{i};
+                    obj.logMessage(sprintf("[%d/%d] Saving: %s", i, total, entry{1}), "info");
                     obj.doSave(entry{2}, entry{1});
                 catch ME
                     obj.logMessage(sprintf("Save failed #%d: %s", i, ME.message), "error");
-                    obj.logMessage(sprintf("  at %s:%d", ME.stack(1).name, ME.stack(1).line), "error");
                 end
             end
             obj.logMessage(sprintf("Saved %d acquisitions.", numel(obj.AcquisitionStore)), "info");
@@ -1084,7 +1095,7 @@ classdef MeasurementManagerApp < handle
                 combined.(fieldName) = data;
             end
 
-            ts = datetime("now", "Format", "yyyy_MM_dd-HH_mm");
+            ts = datetime("now", "Format", "yyyy_MM_dd-HH_mm_ss");
             matPath = fullfile(obj.FolderEdit.Value, ['session_' char(ts) '.mat']);
             if ~isfolder(obj.FolderEdit.Value); mkdir(obj.FolderEdit.Value); end
             save(matPath, "-struct", "combined", "-v7.3");
@@ -1120,9 +1131,13 @@ classdef MeasurementManagerApp < handle
             if n == 0
                 obj.logMessage("Memory already empty.", "info"); return;
             end
+            answer = uiconfirm(obj.Figure, ...
+                sprintf('Clear all %d acquisitions from memory?\nThis cannot be undone.', n), ...
+                'Confirm Clear', 'Options', {'Clear', 'Cancel'}, ...
+                'DefaultOption', 2, 'CancelOption', 2);
+            if ~strcmp(answer, 'Clear'); return; end
             obj.AcquisitionStore = {};
             obj.AcquisitionTable.Data = cell(0, 5);
-            % 清除所有绘图
             axKeys = obj.PlotAxesMap.keys();
             for i = 1:numel(axKeys)
                 ax = obj.PlotAxesMap(axKeys{i});
@@ -1144,6 +1159,22 @@ classdef MeasurementManagerApp < handle
             end
         end
 
+        function elog = collectElogParams(obj)
+            elog = struct();
+            elog.Server = char(string(obj.ServerEdit.Value));
+            elog.Port = obj.PortEdit.Value;
+            elog.Logbook = char(string(obj.LogbookDrop.Value));
+            elog.Author = char(string(obj.AuthorDrop.Value));
+            elog.Sample = obj.buildElogSampleIdentifier();
+            elog.Measurement = char(string(obj.MeasurementEdit.Value));
+            elog.Type = char(string(obj.TypeDrop.Value));
+            elog.Comments = obj.buildElogBodyText();
+            elog.AdditionalAttributes = struct( ...
+                'XOI', char(string(obj.DesignDrop.Value)), ...
+                'Measuretype', char(string(obj.TypeDrop.Value)));
+            elog.Executable = char(string(obj.Config.ElogExecutable));
+        end
+
         function saved = doSave(obj, data, key)
             formats = {};
             if obj.MatCheck.Value; formats{end + 1} = 'mat'; end %#ok<AGROW>
@@ -1155,18 +1186,7 @@ classdef MeasurementManagerApp < handle
             elogParams = struct();
             if obj.AutoElogCheck.Value
                 uploadToElog = true;
-                elogParams.Server = char(string(obj.ServerEdit.Value));
-                elogParams.Port = obj.PortEdit.Value;
-                elogParams.Logbook = char(string(obj.LogbookDrop.Value));
-                elogParams.Author = char(string(obj.AuthorDrop.Value));
-                elogParams.Sample = obj.buildElogSampleIdentifier();
-                elogParams.Measurement = char(string(obj.MeasurementEdit.Value));
-                elogParams.Type = char(string(obj.TypeDrop.Value));
-                elogParams.Comments = obj.buildElogBodyText();
-                elogParams.AdditionalAttributes = struct( ...
-                    'XOI', char(string(obj.DesignDrop.Value)), ...
-                    'Measuretype', char(string(obj.TypeDrop.Value)));
-                elogParams.Executable = char(string(obj.Config.ElogExecutable));
+                elogParams = obj.collectElogParams();
             end
 
             saved = labdevices.core.DataExporter.saveAcquisition(data, ...
@@ -1179,13 +1199,11 @@ classdef MeasurementManagerApp < handle
         end
 
         function onUploadElog(obj, ~, ~)
-            logbook = char(string(obj.LogbookDrop.Value));
-            author = char(string(obj.AuthorDrop.Value));
-            if isempty(logbook)
+            if isempty(char(string(obj.LogbookDrop.Value)))
                 obj.ElogStatusLabel.Text = 'Missing logbook';
                 obj.ElogStatusLabel.FontColor = [1, 0, 0]; return;
             end
-            if isempty(author)
+            if isempty(char(string(obj.AuthorDrop.Value)))
                 obj.ElogStatusLabel.Text = 'Missing author';
                 obj.ElogStatusLabel.FontColor = [1, 0, 0]; return;
             end
@@ -1194,19 +1212,7 @@ classdef MeasurementManagerApp < handle
             obj.ElogStatusLabel.FontColor = [1, 0.6, 0];
             drawnow;
 
-            opts = struct();
-            opts.Executable = char(string(obj.Config.ElogExecutable));
-            opts.Server = char(string(obj.ServerEdit.Value));
-            opts.Port = obj.PortEdit.Value;
-            opts.Logbook = logbook;
-            opts.Author = author;
-            opts.Sample = obj.buildElogSampleIdentifier();
-            opts.Measurement = char(string(obj.MeasurementEdit.Value));
-            opts.Type = char(string(obj.TypeDrop.Value));
-            opts.Comments = obj.buildElogBodyText();
-            opts.AdditionalAttributes = struct( ...
-                'XOI', char(string(obj.DesignDrop.Value)), ...
-                'Measuretype', char(string(obj.TypeDrop.Value)));
+            opts = obj.collectElogParams();
 
             if obj.AttachSnapshotCheck.Value
                 opts.Snapshot = obj.Station.getSnapshot();
@@ -1616,10 +1622,12 @@ classdef MeasurementManagerApp < handle
 
             cla(ax); hold(ax, 'on');
 
+            firstLabel = 'y';
             for i = 1:numel(data.traces)
                 trace = data.traces(i);
                 [x, y, yLabel] = labdevices.core.DataExporter.pickPlotVectors(trace);
                 if isempty(y); continue; end
+                if i == 1; firstLabel = char(yLabel); end
                 if isempty(x); x = (1:numel(y)).'; end
 
                 traceName = '';
@@ -1633,7 +1641,7 @@ classdef MeasurementManagerApp < handle
             end
 
             xlabel(ax, labdevices.core.DataExporter.pickField(data, 'xunit', 'x'), 'FontSize', 12);
-            ylabel(ax, labdevices.core.DataExporter.pickField(data, 'yunit', 'y'), 'FontSize', 12);
+            ylabel(ax, firstLabel, 'FontSize', 12);
 
             titleStr = labdevices.core.DataExporter.pickField(data, 'device', key);
             if isfield(data, 'timestamp')

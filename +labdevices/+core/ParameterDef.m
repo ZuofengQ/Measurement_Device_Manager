@@ -32,10 +32,12 @@ classdef ParameterDef
 
     methods (Static)
         function params = forType(instrumentType)
-            arguments
-                instrumentType string
-            end
-            switch upper(instrumentType)
+            persistent cache;
+            if isempty(cache); cache = containers.Map(); end
+            key = char(upper(instrumentType));
+            if cache.isKey(key); params = cache(key); return; end
+
+            switch key
                 case "ESA"
                     params = labdevices.core.ParameterDef.makeEsaDefaults();
                 case "OSA"
@@ -47,6 +49,7 @@ classdef ParameterDef
                 otherwise
                     params = labdevices.core.ParameterDef.empty();
             end
+            cache(key) = params;
         end
 
         function names = parameterNames(instrumentType)
