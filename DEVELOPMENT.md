@@ -163,16 +163,28 @@ onAcquire(key)
        └── AutoSave → doSave(data, key)
 ```
 
+### 保存按钮语义
+
+| 按钮 | 行为 | 用途 |
+|------|------|------|
+| **Save All** | 保存内存中全部采集数据，每条独立文件 | 全部导出 |
+| **Save Session** | 仅保存每台仪器**最新一次**采集，合并为单个 .mat | 实验归档 |
+| **Save Selected** | 选中表格行后保存对应数据 | 自由选择 |
+| **Clear** | 清空内存数据、表格、图表 | 新一轮测量 |
+
+**Save Session 实现**：使用 `containers.Map` 从后向前遍历 `AcquisitionStore`，每台仪器（按 key）只取第一次遇到（即最新），合并为 struct 后用 `-struct` 存入 .mat。
+
 ### 合并保存 (Save Session)
 
-`onSaveSession()` 将 AcquisitionStore 中所有 `{key, data}` 对合并为单个 struct，以 `-struct` 方式存入 .mat：
+`onSaveSession()` 从尾部遍历 AcquisitionStore，每台仪器仅取最新一条，合并为单个 struct：
 
 ```matlab
-combined.(matlab.lang.makeValidName(key)) = data;
+seen = containers.Map();
+for i = N:-1:1
+    if ~seen.isKey(key); seen(key) = true; combined.(field) = data; end
+end
 save(matPath, "-struct", "combined", "-v7.3");
 ```
-
-同名 key 自动追加 `_2`, `_3` 后缀。
 
 ### 采集队列
 
@@ -182,17 +194,22 @@ Station.acquireAll() 对 map 中没有条目的 key 调用 `defaultAcquireArgs(t
 
 ### ELOG 上传
 
-通过 HTTP POST 将测量记录上传到 ELOG 服务器。面板包含 8 行字段：
-1. Server : Port
-2. Logbook（可编辑下拉）
-3. Author（可编辑下拉）
-4. Sample
-5. Measurement
-6. Comments（多行文本）
-7. **Note（新增 Phase 2）** — 追加到 Comments 末尾
-8. Attach snapshot 勾选 + Upload 按钮
+通过 ELOG 命令行工具上传测量记录。面板为紧凑布局（10行×4列，FontSize 11）：
 
-仪器快照通过 `Station.getSnapshot()` 获取并格式化为表格文本。
+1. Server : Port
+2. Logbook（可编辑下拉，默认 EPIC）
+3. Author（可编辑下拉，默认 Li_Yansong）
+4. XOI/Design : Type（下拉，不可编辑）
+5. Wafer : Chip / Field : Sample（文本字段）
+6. Measurement（文本）
+7. Comments（多行，含备注）
+8. Attach snapshot + Auto-upload + Upload button + Status
+
+**新增字段**（迁移自旧版 MainGui.m）：XOI/Design、Wafer、Field、Chip → 组合为样品标识 `design_wafer_field_chip_sample`；Type → 作为 `Measuretype` 属性。
+
+**上传模式**：手动（App截图PNG + 仪器快照） / 自动（采集数据图PNG + 样品信息）
+
+**关键细节**：ELOG body 分隔符须用字面量 `'\n'`（单引号），禁用 `sprintf('\\n')`（会生成真正换行符破坏命令行）。附件仅 PNG（`exportgraphics` 生成），保存到输出目录。
 
 ## 命名约定
 
@@ -262,3 +279,6 @@ Station.acquireAll() 对 map 中没有条目的 key 调用 `defaultAcquireArgs(t
 | StatusLabel 位置漂移 | 用绝对定位挂在 Figure 上 | 放入 MainGrid 固定行 |
 | InstrumentTable 列数 vs Grid 列数不匹配 | 添加了控件但 Grid 列数未更新 | 始终检查 Grid [m,n] 与子组件 Layout.Column 的一致性 |
 | Properties 类型约束报错 | 某些类在旧版 MATLAB 中未定义（如 TiledChartLayout） | 未知类型去掉类型约束，仅保留属性名 |
+| `sprintf('\\n')` 产生真正换行符 | MATLAB 中 sprintf 解释 `\n` 为 char(10) | ELOG body 分隔符用字面量 `'\n'`（单引号） |
+| `arguments` block 不兼容 struct 传参 | R2024a 中 `opts.Field` 语法需 name=value 调用 | 手动 isfield+默认值替代 arguments block |
+| buildTraceTable x/y 维度不匹配 | OSA 两次独立查询可能返回不同长度 | 取 min 共同长度截断 |
