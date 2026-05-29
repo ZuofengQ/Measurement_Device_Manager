@@ -16,6 +16,7 @@ classdef MeasurementManagerApp < handle
             obj.Station = labdevices.core.Station();
             obj.AcquireParamsMap = containers.Map();
             obj.PlotAxesMap = containers.Map();
+            obj.ParamControlCache = containers.Map();
 
             obj.createComponents();
             obj.populateInstrumentRows();
@@ -41,7 +42,6 @@ classdef MeasurementManagerApp < handle
         % --- UI 根 ---
         Figure      matlab.ui.Figure
         MainGrid    matlab.ui.container.GridLayout
-        TabGroup    matlab.ui.container.TabGroup
 
         % --- 仪器表格 ---
         InstrumentKeys      string
@@ -52,6 +52,7 @@ classdef MeasurementManagerApp < handle
         % --- 参数面板 ---
         ParamGrid           matlab.ui.container.GridLayout
         ParamControls       struct
+        ParamControlCache   containers.Map
         SelectedKey         string
 
         % --- 采集数据 ---
@@ -67,6 +68,7 @@ classdef MeasurementManagerApp < handle
         PlotLayoutDropdown
         LogCollapsed        logical = false
         ToggleLogButton
+        ElogCollapsed       logical = false
 
         % --- 存储面板 ---
         FolderEdit          matlab.ui.control.EditField
@@ -91,6 +93,9 @@ classdef MeasurementManagerApp < handle
         ChipEdit            matlab.ui.control.EditField
         TypeDrop            matlab.ui.control.DropDown
         AutoElogCheck       matlab.ui.control.CheckBox
+        ElogContentGrid     matlab.ui.container.GridLayout
+        ElogToggleButton    matlab.ui.control.Button
+        BottomLeftGrid      matlab.ui.container.GridLayout
 
         % --- 状态栏 & 日志 ---
         StatusLabel         matlab.ui.control.Label
@@ -100,230 +105,336 @@ classdef MeasurementManagerApp < handle
         IsBusy              logical = false
     end
 
+    %% ======================== 设计系统常量 ========================
+    properties (Constant, Access = private)
+        % --- 色彩: 明亮光色主题 (Bright Light Professional) ---
+        COLOR_PRIMARY       = [0.145 0.388 0.922]  % #2563EB 主按钮/选中
+        COLOR_PRIMARY_LIGHT = [0.859 0.918 0.996]  % #DBEAFE 选中行背景
+        COLOR_ACCENT        = [0.008 0.518 0.780]  % #0284C7 信息/次要强调
+        COLOR_SUCCESS       = [0.086 0.639 0.290]  % #16A34A 成功/采集/保存
+        COLOR_WARNING       = [0.918 0.345 0.047]  % #EA580C 警告/忙状态
+        COLOR_DANGER        = [0.863 0.149 0.149]  % #DC2626 删除/断开/清除
+        COLOR_BG            = [0.973 0.980 0.988]  % #F8FAFC Figure 全局背景
+        COLOR_SURFACE       = [1.000 1.000 1.000]  % #FFFFFF 面板/卡片背景
+        COLOR_SURFACE_ALT   = [0.945 0.953 0.976]  % #F1F5F9 表格交替行
+        COLOR_TEXT          = [0.059 0.090 0.165]  % #0F172A 正文/标签
+        COLOR_TEXT_SECONDARY= [0.278 0.333 0.412]  % #475569 辅助文字
+        COLOR_TEXT_MUTED    = [0.580 0.639 0.722]  % #94A3B8 占位符/禁用
+        COLOR_BORDER        = [0.886 0.910 0.941]  % #E2E8F0 面板边框
+        COLOR_BORDER_LIGHT  = [0.945 0.953 0.976]  % #F1F5F9 极淡分隔线
+        COLOR_LAMP_OFF      = [0.796 0.835 0.882]  % #CBD5E1 未连接
+        COLOR_LAMP_ON       = [0.133 0.773 0.369]  % #22C55E 已连接
+        COLOR_LAMP_BUSY     = [0.961 0.620 0.043]  % #F59E0B 采集中
+        COLOR_BUTTON_BG     = [0.940 0.940 0.940]  % 默认按钮背景
+        COLOR_TEAL          = [0.000 0.650 0.650]  % Apply 按钮
+        COLOR_LOG_BG        = [0.970 0.970 0.970]  % 日志区背景
+
+        % --- 排版层级 ---
+        FONT_XL = 18  % 面板标题（与正文明显区分）
+        FONT_LG = 16  % Section 标题
+        FONT_MD = 14  % 正文/按钮/表格
+        FONT_SM = 13  % 辅助文本/下拉框
+        FONT_XS = 12  % 日志/状态栏/ELOG 字段
+
+        % --- 间距体系 (4px 基准) ---
+        SPACE_XS = 2
+        SPACE_SM = 4
+        SPACE_MD = 8
+        SPACE_LG = 12
+        SPACE_XL = 16
+    end
+
     %% ======================== UI 构建 ========================
     methods (Access = private)
         function createComponents(obj)
+            screenSize = get(0, 'ScreenSize');
+            figW = min(1560, screenSize(3) * 0.85);
+            figH = min(920, screenSize(4) * 0.88);
+            figX = max(1, (screenSize(3) - figW) / 2);
+            figY = max(1, (screenSize(4) - figH) / 2);
             obj.Figure = uifigure( ...
                 'Name', 'Measurement Device Manager v2', ...
                 'NumberTitle', 'off', ...
-                'Position', [80, 80, 1560, 920], ...
+                'Position', [figX, figY, figW, figH], ...
+                'Color', obj.COLOR_BG, ...
                 'CloseRequestFcn', @(~,~) obj.onFigureClose(), ...
+                'WindowKeyPressFcn', @(~,evt) obj.onKeyPress(evt), ...
                 'Resize', 'on');
 
             obj.MainGrid = uigridlayout(obj.Figure, [3, 3]);
-            obj.MainGrid.RowHeight = {'1x', '1x', 22};
-            obj.MainGrid.ColumnWidth = {'1.5x', '1x', '0.3x'};
-            obj.MainGrid.Padding = [4, 4, 4, 4];
-            obj.MainGrid.RowSpacing = 3;
-            obj.MainGrid.ColumnSpacing = 3;
+            obj.MainGrid.RowHeight = {'1x', '1x', 30};
+            obj.MainGrid.ColumnWidth = {'1.1x', '1.5x', '0.4x'};
+            obj.MainGrid.Padding = [obj.SPACE_MD, obj.SPACE_MD, obj.SPACE_MD, obj.SPACE_MD];
+            obj.MainGrid.RowSpacing = obj.SPACE_SM;
+            obj.MainGrid.ColumnSpacing = obj.SPACE_SM;
+            obj.MainGrid.BackgroundColor = obj.COLOR_BG;
 
-            % --- 左上: TabGroup (仪器 + 参数) ---
-            obj.TabGroup = uitabgroup(obj.MainGrid);
-            obj.TabGroup.Layout.Row = 1;
-            obj.TabGroup.Layout.Column = 1;
+            % --- 左上: 仪器 + 参数（上下分栏，占行1）---
+            leftWrapper = uigridlayout(obj.MainGrid, [2, 1]);
+            leftWrapper.Layout.Row = 1;
+            leftWrapper.Layout.Column = 1;
+            leftWrapper.RowHeight = {'0.55x', '0.45x'};
+            leftWrapper.Padding = [0, 0, 0, 0];
+            leftWrapper.RowSpacing = obj.SPACE_SM;
+            leftWrapper.BackgroundColor = obj.COLOR_BG;
 
-            % 仪器 Tab
-            instrumentTab = uitab(obj.TabGroup, 'Title', 'Instruments');
-            instrumentGrid = uigridlayout(instrumentTab, [2, 1]);
+            % 上栏: 仪器列表
+            instrPanel = uipanel(leftWrapper, 'Title', 'Instruments', ...
+                'FontSize', obj.FONT_XL, 'FontWeight', 'bold', ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
+                'BorderType', 'line', 'BorderWidth', 1, ...
+                'HighlightColor', obj.COLOR_BORDER);
+            instrPanel.Layout.Row = 1;
+
+            instrumentGrid = uigridlayout(instrPanel, [2, 1]);
             instrumentGrid.RowHeight = {'1x', 'fit'};
             instrumentGrid.ColumnWidth = {'1x'};
-            instrumentGrid.Padding = [4, 4, 4, 4];
-            instrumentGrid.RowSpacing = 3;
+            instrumentGrid.Padding = [obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM];
+            instrumentGrid.RowSpacing = obj.SPACE_SM;
+            instrumentGrid.BackgroundColor = obj.COLOR_SURFACE;
 
-            % 表格 + Lamp 并排
+            % 表格 + Lamp 并排（Connect/Acquire 用 HTML 按钮在表格内，可随表滚动）
             instrTopGrid = uigridlayout(instrumentGrid, [1, 2]);
             instrTopGrid.Layout.Row = 1;
-            instrTopGrid.ColumnWidth = {'1x', 68};
+            instrTopGrid.ColumnWidth = {'1x', 72};
             instrTopGrid.Padding = [0, 0, 0, 0];
-            instrTopGrid.ColumnSpacing = 4;
+            instrTopGrid.ColumnSpacing = obj.SPACE_XS;
 
             obj.InstrumentTable = uitable(instrTopGrid);
             obj.InstrumentTable.Layout.Column = 1;
-            obj.InstrumentTable.ColumnName = {'Instrument', 'Type', 'IP', 'Connect', 'Disconnect', 'Acquire'};
-            obj.InstrumentTable.ColumnWidth = {175, 60, 135, 78, 88, 78};
-            obj.InstrumentTable.ColumnEditable = false(1, 6);
-            obj.InstrumentTable.FontSize = 13;
+            obj.InstrumentTable.ColumnName = {'Instrument', 'Type', 'IP', 'Connect', 'Acquire'};
+            obj.InstrumentTable.ColumnWidth = {180, 55, 120, 85, 85};
+            obj.InstrumentTable.ColumnEditable = false(1, 5);
+            obj.InstrumentTable.FontSize = obj.FONT_MD;
+            obj.InstrumentTable.BackgroundColor = obj.COLOR_SURFACE;
             obj.InstrumentTable.CellSelectionCallback = @(~,evt) obj.onInstrumentSelected(evt);
 
             % Lamp 列
             obj.LampGrid = uigridlayout(instrTopGrid, [1, 1]);
             obj.LampGrid.Layout.Column = 2;
-            obj.LampGrid.Padding = [0, 2, 0, 2];
+            obj.LampGrid.Padding = [0, obj.SPACE_XS, 0, obj.SPACE_XS];
             obj.LampGrid.RowSpacing = 0;
+            obj.LampGrid.BackgroundColor = obj.COLOR_SURFACE;
             obj.LampGrid.Tag = 'LampColumnGrid';
-            % Lamps created in populateInstrumentRows
 
-            % 操作按钮
+            % 批量操作按钮
             buttonGrid = uigridlayout(instrumentGrid, [1, 3]);
             buttonGrid.Layout.Row = 2;
             buttonGrid.Padding = [0, 0, 0, 0];
             buttonGrid.ColumnWidth = {'1x', '1x', '1.15x'};
-            buttonGrid.ColumnSpacing = 8;
-            buttonGrid.BackgroundColor = [0.94, 0.94, 0.94];
+            buttonGrid.ColumnSpacing = obj.SPACE_MD;
+            buttonGrid.BackgroundColor = obj.COLOR_BUTTON_BG;
             uibutton(buttonGrid, 'push', ...
-                'Text', 'Connect All', 'FontSize', 13, ...
+                'Text', 'Connect All', 'FontSize', obj.FONT_MD, ...
+                'BackgroundColor', obj.COLOR_PRIMARY, 'FontColor', [1 1 1], ...
+                'Tooltip', 'Connect All (Ctrl+C)', ...
                 'ButtonPushedFcn', @(~,~) obj.onConnectAll());
             uibutton(buttonGrid, 'push', ...
-                'Text', 'Disconnect All', 'FontSize', 13, ...
+                'Text', 'Disconnect All', 'FontSize', obj.FONT_MD, ...
+                'BackgroundColor', obj.COLOR_DANGER, 'FontColor', [1 1 1], ...
+                'Tooltip', 'Disconnect All (Ctrl+D)', ...
                 'ButtonPushedFcn', @(~,~) obj.onDisconnectAll());
             uibutton(buttonGrid, 'push', ...
-                'Text', 'Acquire All Connected', 'FontSize', 13, ...
+                'Text', 'Acquire All Connected', 'FontSize', obj.FONT_MD, ...
                 'ButtonPushedFcn', @(~,~) obj.onAcquireAll(), ...
-                'BackgroundColor', [0.2, 0.6, 1.0]);
+                'Tooltip', 'Acquire All (Ctrl+Enter)', ...
+                'BackgroundColor', obj.COLOR_SUCCESS, 'FontColor', [1 1 1]);
 
-            % 参数 Tab
-            paramTab = uitab(obj.TabGroup, 'Title', 'Parameters');
-            obj.ParamGrid = uigridlayout(paramTab, [1, 1]);
-            obj.ParamGrid.Padding = [4, 4, 4, 4];
-            obj.ParamGrid.RowSpacing = 3;
+            % 下栏: 参数面板（内联显示，选中仪器即出现）
+            paramPanel = uipanel(leftWrapper, 'Title', 'Parameters', ...
+                'FontSize', obj.FONT_XL, 'FontWeight', 'bold', ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
+                'BorderType', 'line', 'BorderWidth', 1, ...
+                'HighlightColor', obj.COLOR_BORDER);
+            paramPanel.Layout.Row = 2;
+            obj.ParamGrid = uigridlayout(paramPanel, [1, 1]);
+            obj.ParamGrid.Padding = [obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM];
+            obj.ParamGrid.RowSpacing = obj.SPACE_SM;
+            obj.ParamGrid.BackgroundColor = obj.COLOR_SURFACE;
 
             paramPlaceholder = uilabel(obj.ParamGrid, ...
                 'Text', 'Select an instrument to view and edit its parameters.', ...
-                'FontSize', 14, ...
+                'FontSize', obj.FONT_LG, ...
                 'HorizontalAlignment', 'center', ...
-                'FontColor', [0.5, 0.5, 0.5]);
+                'FontColor', obj.COLOR_TEXT_MUTED);
             paramPlaceholder.Layout.Row = 1;
             paramPlaceholder.Layout.Column = 1;
 
             % --- 右上: 数据绘图 + 采集表格 (跨行1-2) ---
-            dataPanel = uipanel(obj.MainGrid, 'Title', 'Live Data View', 'FontSize', 14);
+            dataPanel = uipanel(obj.MainGrid, 'Title', 'Live Data View', ...
+                'FontSize', obj.FONT_XL, 'FontWeight', 'bold', ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
+                'BorderType', 'line', 'BorderWidth', 1, ...
+                'HighlightColor', obj.COLOR_BORDER);
             dataPanel.Layout.Row = [1, 2];
             dataPanel.Layout.Column = 2;
             dataGrid = uigridlayout(dataPanel, [2, 1]);
             dataGrid.RowHeight = {'3x', '1x'};
-            dataGrid.Padding = [4, 4, 4, 4];
-            dataGrid.RowSpacing = 4;
+            dataGrid.Padding = [obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM];
+            dataGrid.RowSpacing = obj.SPACE_SM;
+            dataGrid.BackgroundColor = obj.COLOR_SURFACE;
 
             % 绘图容器: 工具栏 + tile 区域
             plotContainer = uigridlayout(dataGrid, [2, 1]);
             plotContainer.Layout.Row = 1;
-            plotContainer.RowHeight = {28, '1x'};
+            plotContainer.RowHeight = {32, '1x'};
             plotContainer.Padding = [0, 0, 0, 0];
-            plotContainer.RowSpacing = 2;
+            plotContainer.RowSpacing = obj.SPACE_XS;
 
             % 工具栏 (行1)
             toolbarGrid = uigridlayout(plotContainer, [1, 5]);
             toolbarGrid.Layout.Row = 1;
-            toolbarGrid.ColumnWidth = {22, 42, 'fit', '1x', 88};
+            toolbarGrid.ColumnWidth = {24, 42, 'fit', '1x', 88};
             toolbarGrid.Padding = [0, 0, 0, 0];
-            toolbarGrid.ColumnSpacing = 4;
+            toolbarGrid.ColumnSpacing = obj.SPACE_SM;
 
-            uilabel(toolbarGrid, 'Text', char(9776), 'FontSize', 14, ...
+            uilabel(toolbarGrid, 'Text', char(9776), 'FontSize', obj.FONT_LG, ...
                 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
 
-            uilabel(toolbarGrid, 'Text', 'Layout:', 'FontSize', 12, ...
+            uilabel(toolbarGrid, 'Text', 'Layout:', 'FontSize', obj.FONT_SM, ...
                 'HorizontalAlignment', 'right');
             obj.PlotLayoutDropdown = uidropdown(toolbarGrid, ...
                 'Items', {'Flow', '1x1', '2x1', '1x2', '2x2', '3x2', '3x3'}, ...
                 'Value', 'Flow', ...
-                'FontSize', 12, ...
+                'FontSize', obj.FONT_SM, ...
                 'ValueChangedFcn', @(~,evt) obj.onPlotLayoutChanged(evt));
 
             obj.ToggleLogButton = uibutton(toolbarGrid, 'push', ...
                 'Text', 'Hide Log', ...
-                'FontSize', 11, ...
+                'FontSize', obj.FONT_XS, ...
+                'BackgroundColor', obj.COLOR_BUTTON_BG, ...
+                'Tooltip', 'Toggle Log (Ctrl+L)', ...
                 'ButtonPushedFcn', @(~,~) obj.toggleLogCollapse());
             obj.ToggleLogButton.Layout.Column = 5;
 
             % 绘图 tile 区域 (行2)
             plotPanel = uipanel(plotContainer, 'BorderType', 'none');
             plotPanel.Layout.Row = 2;
+            plotPanel.BackgroundColor = obj.COLOR_SURFACE;
             obj.PlotTileLayout = tiledlayout(plotPanel, 'flow');
             obj.PlotTileLayout.Padding = 'compact';
             obj.PlotTileLayout.TileSpacing = 'compact';
-            title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', 12);
+            title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', obj.FONT_SM);
 
             % 采集表格 (行2)
             obj.AcquisitionTable = uitable(dataGrid);
             obj.AcquisitionTable.Layout.Row = 2;
             obj.AcquisitionTable.ColumnName = {'Device', 'Type', 'Timestamp', 'Traces', 'Status'};
-            obj.AcquisitionTable.ColumnWidth = {90, 55, 130, 55, 60};
-            obj.AcquisitionTable.FontSize = 13;
+            obj.AcquisitionTable.ColumnWidth = {130, 65, 165, 70, 75};
+            obj.AcquisitionTable.FontSize = obj.FONT_MD;
+            obj.AcquisitionTable.BackgroundColor = obj.COLOR_SURFACE;
             obj.AcquisitionTable.Data = cell(0, 5);
             obj.AcquisitionTable.CellSelectionCallback = @(~,evt) obj.onDataRowSelected(evt);
 
             % --- 左下: 存储 + ELOG ---
-            bottomLeft = uigridlayout(obj.MainGrid, [2, 1]);
-            bottomLeft.Layout.Row = 2;
-            bottomLeft.Layout.Column = 1;
-            bottomLeft.RowHeight = {'fit', '1x'};
-            bottomLeft.RowSpacing = 4;
-            bottomLeft.Padding = [0, 0, 0, 0];
+            obj.BottomLeftGrid = uigridlayout(obj.MainGrid, [2, 1]);
+            obj.BottomLeftGrid.Layout.Row = 2;
+            obj.BottomLeftGrid.Layout.Column = 1;
+            obj.BottomLeftGrid.RowHeight = {'fit', '1x'};
+            obj.BottomLeftGrid.RowSpacing = obj.SPACE_SM;
+            obj.BottomLeftGrid.Padding = [0, 0, 0, 0];
 
-            obj.buildStoragePanel(bottomLeft);
-            obj.buildElogPanel(bottomLeft);
+            obj.buildStoragePanel(obj.BottomLeftGrid);
+            obj.buildElogPanel(obj.BottomLeftGrid);
 
             % --- 右列: 状态日志 (跨行1-2, 窄列) ---
-            logPanel = uipanel(obj.MainGrid, 'Title', 'Status Log', 'FontSize', 14);
+            logPanel = uipanel(obj.MainGrid, 'Title', 'Status Log', ...
+                'FontSize', obj.FONT_XL, 'FontWeight', 'bold', ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
+                'BorderType', 'line', 'BorderWidth', 1, ...
+                'HighlightColor', obj.COLOR_BORDER);
             logPanel.Layout.Row = [1, 2];
             logPanel.Layout.Column = 3;
             logGrid = uigridlayout(logPanel, [1, 1]);
-            logGrid.Padding = [3, 3, 3, 3];
+            logGrid.Padding = [obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM];
 
             obj.LogArea = uitextarea(logGrid, ...
                 'Editable', 'off', ...
-                'FontSize', 11, ...
+                'FontSize', obj.FONT_XS, ...
+                'FontName', 'Consolas', ...
+                'BackgroundColor', obj.COLOR_LOG_BG, ...
+                'FontColor', obj.COLOR_TEXT_SECONDARY, ...
                 'WordWrap', 'on', ...
                 'Value', '');
 
-            % --- 底部状态栏（第3行，跨两列）---
+            % --- 底部状态栏（第3行，跨所有列）---
             obj.StatusLabel = uilabel(obj.MainGrid, ...
                 'Text', 'Ready', ...
-                'FontSize', 11, ...
+                'FontSize', obj.FONT_SM, ...
+                'FontWeight', 'bold', ...
+                'FontColor', obj.COLOR_TEXT, ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
                 'HorizontalAlignment', 'left');
             obj.StatusLabel.Layout.Row = 3;
             obj.StatusLabel.Layout.Column = [1, 3];
         end
 
         function buildStoragePanel(obj, parent)
-            panel = uipanel(parent, 'Title', 'Data Storage', 'FontSize', 14);
+            panel = uipanel(parent, 'Title', 'Data Storage', ...
+                'FontSize', obj.FONT_XL, 'FontWeight', 'bold', ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
+                'BorderType', 'line', 'BorderWidth', 1, ...
+                'HighlightColor', obj.COLOR_BORDER);
             panel.Layout.Row = 1;
             panel.Layout.Column = 1;
 
             storageGrid = uigridlayout(panel, [4, 5]);
-            storageGrid.RowHeight = {24, 24, 24, 32};
+            storageGrid.RowHeight = {28, 28, 28, 34};
             storageGrid.ColumnWidth = {'fit', '1x', 'fit', 'fit', 'fit'};
-            storageGrid.Padding = [4, 4, 4, 4];
-            storageGrid.RowSpacing = 3;
-            storageGrid.ColumnSpacing = 4;
+            storageGrid.Padding = [obj.SPACE_MD, obj.SPACE_MD, obj.SPACE_MD, obj.SPACE_MD];
+            storageGrid.RowSpacing = obj.SPACE_SM;
+            storageGrid.ColumnSpacing = obj.SPACE_SM;
+            storageGrid.BackgroundColor = obj.COLOR_SURFACE;
 
             % 文件夹行
-            uilabel(storageGrid, 'Text', 'Folder:', 'FontSize', 14);
+            uilabel(storageGrid, 'Text', 'Folder:', 'FontSize', obj.FONT_LG);
             obj.FolderEdit = uieditfield(storageGrid, 'text', ...
-                'Value', obj.Config.Folder, 'FontSize', 13, 'Editable', 'on');
+                'Value', obj.Config.Folder, 'FontSize', obj.FONT_MD, 'Editable', 'on');
             obj.FolderEdit.Layout.Column = [2, 4];
-            browseButton = uibutton(storageGrid, 'push', 'Text', 'Browse', 'FontSize', 13, ...
+            browseButton = uibutton(storageGrid, 'push', 'Text', 'Browse', ...
+                'FontSize', obj.FONT_MD, ...
+                'BackgroundColor', obj.COLOR_BUTTON_BG, ...
                 'ButtonPushedFcn', @(~,~) obj.onBrowseFolder());
             browseButton.Layout.Row = 1;
             browseButton.Layout.Column = 5;
 
             % 格式选择行
-            uilabel(storageGrid, 'Text', 'Formats:', 'FontSize', 14);
+            uilabel(storageGrid, 'Text', 'Formats:', 'FontSize', obj.FONT_LG);
             formatSubGrid = uigridlayout(storageGrid, [1, 3]);
             formatSubGrid.Layout.Column = [2, 5];
             formatSubGrid.ColumnWidth = {'fit', 'fit', 'fit'};
             formatSubGrid.Padding = [0, 0, 0, 0];
-            formatSubGrid.ColumnSpacing = 10;
-            obj.MatCheck = uicheckbox(formatSubGrid, 'Text', 'MAT', 'FontSize', 13, 'Value', true);
-            obj.CsvCheck = uicheckbox(formatSubGrid, 'Text', 'CSV', 'FontSize', 13, 'Value', true);
-            obj.PngCheck = uicheckbox(formatSubGrid, 'Text', 'PNG', 'FontSize', 13, 'Value', false);
+            formatSubGrid.ColumnSpacing = obj.SPACE_LG;
+            obj.MatCheck = uicheckbox(formatSubGrid, 'Text', 'MAT', ...
+                'FontSize', obj.FONT_MD, 'Value', true);
+            obj.CsvCheck = uicheckbox(formatSubGrid, 'Text', 'CSV', ...
+                'FontSize', obj.FONT_MD, 'Value', true);
+            obj.PngCheck = uicheckbox(formatSubGrid, 'Text', 'PNG', ...
+                'FontSize', obj.FONT_MD, 'Value', false);
 
             % 操作行
             obj.AutoSaveCheck = uicheckbox(storageGrid, ...
-                'Text', 'Auto-save after acquire', 'FontSize', 13, 'Value', true);
+                'Text', 'Auto-save after acquire', 'FontSize', obj.FONT_MD, 'Value', true);
             obj.AutoSaveCheck.Layout.Column = [1, 2];
             obj.AutoSaveCheck.Layout.Row = 3;
 
-            saveAllButton = uibutton(storageGrid, 'push', 'Text', 'Save All', 'FontSize', 13, ...
+            saveAllButton = uibutton(storageGrid, 'push', 'Text', 'Save All', ...
+                'FontSize', obj.FONT_MD, ...
+                'BackgroundColor', obj.COLOR_PRIMARY, 'FontColor', [1 1 1], ...
+                'Tooltip', 'Save All (Ctrl+S)', ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveAll());
-            saveSessionButton = uibutton(storageGrid, 'push', 'Text', 'Save Session', 'FontSize', 13, ...
+            saveSessionButton = uibutton(storageGrid, 'push', 'Text', 'Save Session', ...
+                'FontSize', obj.FONT_MD, ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveSession(), ...
-                'BackgroundColor', [0.0, 0.5, 0.2]);
-            saveSelectedButton = uibutton(storageGrid, 'push', 'Text', 'Save Selected', 'FontSize', 13, ...
+                'BackgroundColor', obj.COLOR_SUCCESS, 'FontColor', [1 1 1]);
+            saveSelectedButton = uibutton(storageGrid, 'push', 'Text', 'Save Selected', ...
+                'FontSize', obj.FONT_MD, ...
+                'BackgroundColor', obj.COLOR_ACCENT, 'FontColor', [1 1 1], ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveSelected());
-            clearMemButton = uibutton(storageGrid, 'push', 'Text', 'Clear', 'FontSize', 13, ...
+            clearMemButton = uibutton(storageGrid, 'push', 'Text', 'Clear', ...
+                'FontSize', obj.FONT_MD, ...
                 'ButtonPushedFcn', @(~,~) obj.onClearMemory(), ...
-                'BackgroundColor', [0.8, 0.2, 0.2]);
+                'BackgroundColor', obj.COLOR_DANGER, 'FontColor', [1 1 1]);
             saveAllButton.Layout.Row = 4;
             saveAllButton.Layout.Column = 1;
             saveSessionButton.Layout.Row = 4;
@@ -335,31 +446,74 @@ classdef MeasurementManagerApp < handle
         end
 
         function buildElogPanel(obj, parent)
-            panel = uipanel(parent, 'Title', 'ELOG Upload', 'FontSize', 12);
+            panel = uipanel(parent, 'Title', '', ...
+                'BackgroundColor', obj.COLOR_SURFACE, ...
+                'BorderType', 'line', 'BorderWidth', 1, ...
+                'HighlightColor', obj.COLOR_BORDER);
             panel.Layout.Row = 2;
             panel.Layout.Column = 1;
 
-            elogGrid = uigridlayout(panel, [10, 4]);
-            elogGrid.RowHeight = {18, 18, 18, 18, 18, 18, 18, 36, 22, 14};
+            % 外层: 头部栏 + 内容区
+            outerGrid = uigridlayout(panel, [2, 1]);
+            outerGrid.RowHeight = {30, '1x'};
+            outerGrid.Padding = [0, 0, 0, 0];
+            outerGrid.RowSpacing = 0;
+            outerGrid.BackgroundColor = obj.COLOR_SURFACE;
+
+            % 头部栏: [Toggle ▼/▲] [ELOG Upload title] [Status] [Upload button]
+            headerGrid = uigridlayout(outerGrid, [1, 5]);
+            headerGrid.Layout.Row = 1;
+            headerGrid.ColumnWidth = {24, 'fit', '1x', 'fit', 60};
+            headerGrid.Padding = [obj.SPACE_SM, obj.SPACE_XS, obj.SPACE_SM, obj.SPACE_XS];
+            headerGrid.ColumnSpacing = obj.SPACE_SM;
+            headerGrid.BackgroundColor = obj.COLOR_SURFACE_ALT;
+
+            toggleBtn = uibutton(headerGrid, 'push', ...
+                'Text', char(9660), 'FontSize', 10, ...
+                'BackgroundColor', obj.COLOR_BUTTON_BG, ...
+                'ButtonPushedFcn', @(~,~) obj.toggleElogCollapse());
+            obj.ElogToggleButton = toggleBtn;
+
+            uilabel(headerGrid, 'Text', 'ELOG Upload', ...
+                'FontSize', obj.FONT_LG, 'FontWeight', 'bold', ...
+                'HorizontalAlignment', 'left');
+
+            obj.ElogStatusLabel = uilabel(headerGrid, ...
+                'Text', 'Idle', 'FontSize', 10, ...
+                'FontColor', obj.COLOR_TEXT_MUTED);
+            obj.ElogStatusLabel.Layout.Column = 3;
+
+            uploadBtn = uibutton(headerGrid, 'push', ...
+                'Text', 'Upload', 'FontSize', obj.FONT_XS, ...
+                'ButtonPushedFcn', @(~,~) obj.onUploadElog(), ...
+                'BackgroundColor', obj.COLOR_PRIMARY, 'FontColor', [1 1 1]);
+            uploadBtn.Layout.Column = 5;
+
+            % 内容区 (可折叠)
+            elogGrid = uigridlayout(outerGrid, [10, 4]);
+            elogGrid.Layout.Row = 2;
+            elogGrid.RowHeight = {24, 24, 24, 24, 24, 24, 24, 44, 26, 18};
             elogGrid.ColumnWidth = {'fit', '1x', 'fit', '1x'};
-            elogGrid.Padding = [2, 2, 2, 2];
-            elogGrid.RowSpacing = 1;
-            elogGrid.ColumnSpacing = 2;
+            elogGrid.Padding = [obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM];
+            elogGrid.RowSpacing = obj.SPACE_SM;
+            elogGrid.ColumnSpacing = obj.SPACE_SM;
+            elogGrid.BackgroundColor = obj.COLOR_SURFACE;
+            obj.ElogContentGrid = elogGrid;
 
             % 1: Server : Port
-            uilabel(elogGrid, 'Text', 'Server:', 'FontSize', 11);
+            uilabel(elogGrid, 'Text', 'Server:', 'FontSize', obj.FONT_XS);
             obj.ServerEdit = uieditfield(elogGrid, 'text', ...
-                'Value', obj.Config.ElogServer, 'FontSize', 11);
+                'Value', obj.Config.ElogServer, 'FontSize', obj.FONT_XS);
             obj.ServerEdit.Layout.Column = 2;
-            uilabel(elogGrid, 'Text', 'Port:', 'FontSize', 11);
+            uilabel(elogGrid, 'Text', 'Port:', 'FontSize', obj.FONT_XS);
             obj.PortEdit = uieditfield(elogGrid, 'numeric', ...
-                'Value', obj.Config.ElogPort, 'FontSize', 11, ...
+                'Value', obj.Config.ElogPort, 'FontSize', obj.FONT_XS, ...
                 'Limits', [1, 65535], 'RoundFractionalValues', 'on');
             obj.PortEdit.Layout.Column = 4;
 
             % 2: Logbook
-            uilabel(elogGrid, 'Text', 'Logbook:', 'FontSize', 11);
-            obj.LogbookDrop = uidropdown(elogGrid, 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Logbook:', 'FontSize', obj.FONT_XS);
+            obj.LogbookDrop = uidropdown(elogGrid, 'FontSize', obj.FONT_XS, ...
                 'Items', cellstr(string(obj.Config.ElogLogbooks)), ...
                 'Value', obj.pickDropDownValue(obj.Config.ElogLogbooks, ...
                     obj.Config.ElogSelectedLogbook), ...
@@ -367,8 +521,8 @@ classdef MeasurementManagerApp < handle
             obj.LogbookDrop.Layout.Column = [2, 4];
 
             % 3: Author
-            uilabel(elogGrid, 'Text', 'Author:', 'FontSize', 11);
-            obj.AuthorDrop = uidropdown(elogGrid, 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Author:', 'FontSize', obj.FONT_XS);
+            obj.AuthorDrop = uidropdown(elogGrid, 'FontSize', obj.FONT_XS, ...
                 'Items', cellstr(string(obj.Config.ElogAuthors)), ...
                 'Value', obj.pickDropDownValue(obj.Config.ElogAuthors, ...
                     obj.Config.ElogSelectedAuthor), ...
@@ -376,15 +530,15 @@ classdef MeasurementManagerApp < handle
             obj.AuthorDrop.Layout.Column = [2, 4];
 
             % 4: XOI/Design : Type
-            uilabel(elogGrid, 'Text', 'XOI/Design:', 'FontSize', 11);
-            obj.DesignDrop = uidropdown(elogGrid, 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'XOI/Design:', 'FontSize', obj.FONT_XS);
+            obj.DesignDrop = uidropdown(elogGrid, 'FontSize', obj.FONT_XS, ...
                 'Items', cellstr(string(obj.Config.ElogDesign)), ...
                 'Value', obj.pickDropDownValue(obj.Config.ElogDesign, ...
                     obj.Config.ElogSelectedDesign), ...
                 'Editable', 'off');
             obj.DesignDrop.Layout.Column = 2;
-            uilabel(elogGrid, 'Text', 'Type:', 'FontSize', 11);
-            obj.TypeDrop = uidropdown(elogGrid, 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Type:', 'FontSize', obj.FONT_XS);
+            obj.TypeDrop = uidropdown(elogGrid, 'FontSize', obj.FONT_XS, ...
                 'Items', cellstr(string(obj.Config.ElogType)), ...
                 'Value', obj.pickDropDownValue(obj.Config.ElogType, ...
                     obj.Config.ElogSelectedType), ...
@@ -392,59 +546,56 @@ classdef MeasurementManagerApp < handle
             obj.TypeDrop.Layout.Column = 4;
 
             % 5: Wafer : Chip
-            uilabel(elogGrid, 'Text', 'Wafer:', 'FontSize', 11);
-            obj.WaferEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Wafer:', 'FontSize', obj.FONT_XS);
+            obj.WaferEdit = uieditfield(elogGrid, 'text', 'FontSize', obj.FONT_XS, ...
                 'Value', obj.Config.ElogWafer);
             obj.WaferEdit.Layout.Column = 2;
-            uilabel(elogGrid, 'Text', 'Chip:', 'FontSize', 11);
-            obj.ChipEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Chip:', 'FontSize', obj.FONT_XS);
+            obj.ChipEdit = uieditfield(elogGrid, 'text', 'FontSize', obj.FONT_XS, ...
                 'Value', obj.Config.ElogChip);
             obj.ChipEdit.Layout.Column = 4;
 
             % 6: Field : Sample
-            uilabel(elogGrid, 'Text', 'Field:', 'FontSize', 11);
-            obj.FieldEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Field:', 'FontSize', obj.FONT_XS);
+            obj.FieldEdit = uieditfield(elogGrid, 'text', 'FontSize', obj.FONT_XS, ...
                 'Value', obj.Config.ElogField);
             obj.FieldEdit.Layout.Column = 2;
-            uilabel(elogGrid, 'Text', 'Sample:', 'FontSize', 11);
-            obj.SampleEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Sample:', 'FontSize', obj.FONT_XS);
+            obj.SampleEdit = uieditfield(elogGrid, 'text', 'FontSize', obj.FONT_XS, ...
                 'Value', obj.Config.ElogSample);
             obj.SampleEdit.Layout.Column = 4;
 
             % 7: Measurement
-            uilabel(elogGrid, 'Text', 'Meas.:', 'FontSize', 11);
-            obj.MeasurementEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, 'Value', '');
+            uilabel(elogGrid, 'Text', 'Meas.:', 'FontSize', obj.FONT_XS);
+            obj.MeasurementEdit = uieditfield(elogGrid, 'text', 'FontSize', obj.FONT_XS, 'Value', '');
             obj.MeasurementEdit.Layout.Column = [2, 4];
 
             % 8: Comments (compact)
-            uilabel(elogGrid, 'Text', 'Comments:', 'FontSize', 11);
-            obj.CommentsArea = uitextarea(elogGrid, 'FontSize', 11, ...
+            uilabel(elogGrid, 'Text', 'Comments:', 'FontSize', obj.FONT_XS);
+            obj.CommentsArea = uitextarea(elogGrid, 'FontSize', obj.FONT_XS, ...
                 'Value', '', 'Placeholder', 'ELOG comments / notes...');
             obj.CommentsArea.Layout.Column = [2, 4];
 
-            % 9: Upload row
+            % 9: Upload row (checkboxes only — Upload button is in header)
             obj.AttachSnapshotCheck = uicheckbox(elogGrid, ...
-                'Text', 'Attach snapshot (.png)', 'FontSize', 11, 'Value', true);
+                'Text', 'Attach snapshot (.png)', 'FontSize', obj.FONT_XS, 'Value', true);
             obj.AttachSnapshotCheck.Layout.Column = 1;
             obj.AttachSnapshotCheck.Layout.Row = 9;
 
             obj.AutoElogCheck = uicheckbox(elogGrid, ...
-                'Text', 'Auto-upload on save', 'FontSize', 11, ...
+                'Text', 'Auto-upload on save', 'FontSize', obj.FONT_XS, ...
                 'Value', obj.Config.ElogAutoUpload);
             obj.AutoElogCheck.Layout.Column = 2;
             obj.AutoElogCheck.Layout.Row = 9;
 
-            uploadButton = uibutton(elogGrid, 'push', ...
-                'Text', 'Upload', 'FontSize', 11, ...
-                'ButtonPushedFcn', @(~,~) obj.onUploadElog(), ...
-                'BackgroundColor', [0.1, 0.4, 0.8]);
-            uploadButton.Layout.Row = 9;
-            uploadButton.Layout.Column = [3, 4];
+            % 10: Status (collapsed view shows this in header instead)
+            elogStatusLine = uilabel(elogGrid, ...
+                'Text', '', 'FontSize', 10, 'FontColor', obj.COLOR_TEXT_MUTED);
+            elogStatusLine.Layout.Row = 10;
+            elogStatusLine.Layout.Column = [1, 4];
 
-            obj.ElogStatusLabel = uilabel(elogGrid, ...
-                'Text', 'Idle', 'FontSize', 10, 'FontColor', [0.5, 0.5, 0.5]);
-            obj.ElogStatusLabel.Layout.Row = 10;
-            obj.ElogStatusLabel.Layout.Column = [1, 4];
+            % 默认展开
+            obj.ElogCollapsed = false;
         end
 
         function populateInstrumentRows(obj)
@@ -453,8 +604,8 @@ classdef MeasurementManagerApp < handle
             obj.InstrumentKeys = allKeys;
             nInstruments = numel(allKeys);
 
-            % 表格数据（6列，无Status列）
-            tableData = cell(nInstruments, 6);
+            % 表格数据（5列: Instrument, Type, IP, Connect, Acquire）
+            tableData = cell(nInstruments, 5);
             for i = 1:nInstruments
                 k = allKeys(i);
                 entry = registry.(k);
@@ -462,54 +613,41 @@ classdef MeasurementManagerApp < handle
                 tableData{i, 2} = char(entry.type);
                 tableData{i, 3} = char(entry.ip);
                 tableData{i, 4} = 'Connect';
-                tableData{i, 5} = 'Disconnect';
-                tableData{i, 6} = 'Acquire';
+                tableData{i, 5} = 'Acquire';
             end
             obj.InstrumentTable.Data = tableData;
             obj.InstrumentTable.UserData = allKeys;
 
-            % 创建 Lamp 控件（在 instrTopGrid 的 lampCol 中）
-            % 找到 lamp 列 grid（通过 Tag 查找）
+            % 创建 Lamp 控件
             lampCol = obj.LampGrid;
             if ~isempty(lampCol) && isvalid(lampCol)
-                % 清除旧内容，重建
                 delete(lampCol.Children);
-                % 首行留空给表头偏移，后续每行一个 lamp
-                lampCol.RowHeight = [{'1x'}, repmat({'1x'}, 1, nInstruments)];
+                lampCol.RowHeight = [{'fit'}, repmat({'1x'}, 1, nInstruments)];
                 lampCol.ColumnWidth = {'1x'};
                 lampCol.Padding = [0, 6, 0, 6];
                 obj.StatusLamps = matlab.ui.control.Lamp.empty();
                 for i = 1:nInstruments
                     obj.StatusLamps(i) = uilamp(lampCol, ...
-                        'Color', [0.55, 0.55, 0.55]);
+                        'Color', obj.COLOR_LAMP_OFF);
                     obj.StatusLamps(i).Layout.Row = i + 1;
                     obj.StatusLamps(i).Layout.Column = 1;
-                    obj.StatusLamps(i).Position(3:4) = [18 18];
                 end
             end
         end
 
         function refreshParameterPanel(obj, key)
-            if ~isempty(obj.ParamControls)
-                fns = fieldnames(obj.ParamControls);
-                for i = 1:numel(fns)
-                    ctrl = obj.ParamControls.(fns{i});
-                    if isvalid(ctrl); delete(ctrl); end
+            % 隐藏所有已缓存的参数面板
+            cacheKeys = obj.ParamControlCache.keys();
+            for i = 1:numel(cacheKeys)
+                entry = obj.ParamControlCache(cacheKeys{i});
+                if isfield(entry, 'grid') && isvalid(entry.grid)
+                    entry.grid.Visible = 'off';
                 end
-                obj.ParamControls = struct();
-            end
-            children = obj.ParamGrid.Children;
-            for i = 1:numel(children)
-                delete(children(i));
             end
 
+            % 空选择 → 显示占位符
             if isempty(key) || strlength(key) == 0
-                placeholder = uilabel(obj.ParamGrid, ...
-                    'Text', 'Select an instrument to view and edit its parameters.', ...
-                    'FontSize', 14, 'HorizontalAlignment', 'center', ...
-                    'FontColor', [0.5, 0.5, 0.5]);
-                placeholder.Layout.Row = 1;
-                placeholder.Layout.Column = 1;
+                obj.ParamControls = struct();
                 return;
             end
 
@@ -518,35 +656,42 @@ classdef MeasurementManagerApp < handle
             if ~isfield(registry, k); return; end
             instrType = registry.(k).type;
 
+            % 检查缓存：如果已有该仪器的面板，直接显示
+            if obj.ParamControlCache.isKey(key)
+                entry = obj.ParamControlCache(key);
+                if isfield(entry, 'grid') && isvalid(entry.grid)
+                    entry.grid.Visible = 'on';
+                    obj.ParamControls = entry.controls;
+                    return;
+                end
+            end
+
+            % 未缓存 → 构建新面板
             params = labdevices.core.ParameterDef.forType(instrType);
             nParams = numel(params);
 
             if nParams == 0
-                placeholder = uilabel(obj.ParamGrid, ...
-                    'Text', sprintf('No configurable parameters for %s.', instrType), ...
-                    'FontSize', 14, 'HorizontalAlignment', 'center', ...
-                    'FontColor', [0.5, 0.5, 0.5]);
-                placeholder.Layout.Row = 1;
-                placeholder.Layout.Column = 1;
+                obj.ParamControls = struct();
                 return;
             end
 
             fullParamGrid = uigridlayout(obj.ParamGrid, [nParams + 1, 3]);
             fullParamGrid.RowHeight = [repmat({'fit'}, 1, nParams), {'fit'}];
             fullParamGrid.ColumnWidth = {'1.5x', '2x', '0.5x'};
-            fullParamGrid.Padding = [4, 4, 4, 4];
-            fullParamGrid.RowSpacing = 3;
-            fullParamGrid.ColumnSpacing = 4;
+            fullParamGrid.Padding = [obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM, obj.SPACE_SM];
+            fullParamGrid.RowSpacing = obj.SPACE_SM;
+            fullParamGrid.ColumnSpacing = obj.SPACE_SM;
+            fullParamGrid.BackgroundColor = obj.COLOR_SURFACE;
             fullParamGrid.Layout.Row = 1;
             fullParamGrid.Layout.Column = 1;
 
-            obj.ParamControls = struct();
+            newControls = struct();
 
             for i = 1:nParams
                 pDef = params(i);
 
                 lbl = uilabel(fullParamGrid, 'Text', char(pDef.Label), ...
-                    'FontSize', 14, 'Tooltip', char(pDef.Tooltip));
+                    'FontSize', obj.FONT_LG, 'Tooltip', char(pDef.Tooltip));
                 lbl.Layout.Row = i;
                 lbl.Layout.Column = 1;
 
@@ -554,10 +699,10 @@ classdef MeasurementManagerApp < handle
                 switch pDef.Type
                     case "numeric"
                         ctrl = uieditfield(fullParamGrid, 'numeric', ...
-                            'FontSize', 14, 'Value', pDef.Default, ...
+                            'FontSize', obj.FONT_LG, 'Value', pDef.Default, ...
                             'Tooltip', char(pDef.Tooltip));
                     case "logical"
-                        ctrl = uicheckbox(fullParamGrid, 'FontSize', 14, ...
+                        ctrl = uicheckbox(fullParamGrid, 'FontSize', obj.FONT_LG, ...
                             'Text', char(pDef.Label), 'Value', pDef.Default);
                         lbl.Text = '';
                     case "choice"
@@ -571,11 +716,11 @@ classdef MeasurementManagerApp < handle
                         if ~any(strcmp(string(items), val))
                             val = items(1);
                         end
-                        ctrl = uidropdown(fullParamGrid, 'FontSize', 14, ...
+                        ctrl = uidropdown(fullParamGrid, 'FontSize', obj.FONT_LG, ...
                             'Items', items, 'Value', val, ...
                             'Tooltip', char(pDef.Tooltip));
                     otherwise
-                        ctrl = uieditfield(fullParamGrid, 'text', 'FontSize', 14, ...
+                        ctrl = uieditfield(fullParamGrid, 'text', 'FontSize', obj.FONT_LG, ...
                             'Value', string(pDef.Default));
                 end
                 ctrl.Layout.Row = i;
@@ -584,12 +729,12 @@ classdef MeasurementManagerApp < handle
 
                 if strlength(pDef.Unit) > 0
                     unitLbl = uilabel(fullParamGrid, 'Text', char(pDef.Unit), ...
-                        'FontSize', 12, 'FontColor', [0.4, 0.4, 0.4]);
+                        'FontSize', obj.FONT_SM, 'FontColor', obj.COLOR_TEXT_SECONDARY);
                     unitLbl.Layout.Row = i;
                     unitLbl.Layout.Column = 3;
                 end
 
-                obj.ParamControls.(ctrlName) = ctrl;
+                newControls.(ctrlName) = ctrl;
             end
 
             % 四按钮行
@@ -597,23 +742,30 @@ classdef MeasurementManagerApp < handle
             btnRow.Layout.Row = nParams + 1;
             btnRow.Layout.Column = [1, 3];
             btnRow.ColumnWidth = {'fit', 'fit', 'fit', '1x', 'fit'};
-            btnRow.Padding = [0, 4, 0, 0];
-            btnRow.ColumnSpacing = 4;
+            btnRow.Padding = [0, obj.SPACE_SM, 0, 0];
+            btnRow.ColumnSpacing = obj.SPACE_SM;
 
-            uibutton(btnRow, 'push', 'Text', 'Apply', 'FontSize', 14, ...
+            uibutton(btnRow, 'push', 'Text', 'Apply', 'FontSize', obj.FONT_LG, ...
                 'ButtonPushedFcn', @(~,~) obj.onApplyParameters(), ...
-                'BackgroundColor', [0.0, 0.7, 0.7], ...
+                'BackgroundColor', obj.COLOR_TEAL, 'FontColor', [1 1 1], ...
                 'Tooltip', 'Apply configuration only (no acquisition)');
-            uibutton(btnRow, 'push', 'Text', 'Acquire', 'FontSize', 14, ...
+            uibutton(btnRow, 'push', 'Text', 'Acquire', 'FontSize', obj.FONT_LG, ...
                 'ButtonPushedFcn', @(~,~) obj.onAcquireSelected(), ...
-                'BackgroundColor', [0.2, 0.7, 0.3], ...
+                'BackgroundColor', obj.COLOR_SUCCESS, 'FontColor', [1 1 1], ...
                 'Tooltip', 'Acquire with stored parameters');
-            uibutton(btnRow, 'push', 'Text', 'Apply+Acquire', 'FontSize', 14, ...
+            uibutton(btnRow, 'push', 'Text', 'Apply+Acquire', 'FontSize', obj.FONT_LG, ...
                 'ButtonPushedFcn', @(~,~) obj.onApplyAndAcquire(), ...
-                'BackgroundColor', [0.2, 0.6, 1.0], ...
+                'BackgroundColor', obj.COLOR_PRIMARY, 'FontColor', [1 1 1], ...
                 'Tooltip', 'Configure then acquire');
-            uibutton(btnRow, 'push', 'Text', 'Reset', 'FontSize', 14, ...
+            uibutton(btnRow, 'push', 'Text', 'Reset', 'FontSize', obj.FONT_LG, ...
+                'BackgroundColor', obj.COLOR_BUTTON_BG, ...
                 'ButtonPushedFcn', @(~,~) obj.resetParameterDefaults());
+
+            % 存入缓存
+            cacheEntry.grid = fullParamGrid;
+            cacheEntry.controls = newControls;
+            obj.ParamControlCache(key) = cacheEntry;
+            obj.ParamControls = newControls;
         end
     end
 
@@ -669,18 +821,12 @@ classdef MeasurementManagerApp < handle
             row = indices(1); col = indices(2);
             key = obj.InstrumentKeys(row);
 
-            % 6列: 1=Name,2=Type,3=IP,4=Connect,5=Disconnect,6=Acquire
+            % 5列: 1=Instrument,2=Type,3=IP,4=Connect,5=Acquire
             if col == 4; obj.onConnect(key); return;
-            elseif col == 5; obj.onDisconnect(key); return;
-            elseif col == 6; obj.onAcquire(key); return;
+            elseif col == 5; obj.onAcquire(key); return;
             end
 
             obj.SelectedKey = key;
-            for t = 1:numel(obj.TabGroup.Children)
-                if strcmp(obj.TabGroup.Children(t).Title, 'Parameters')
-                    obj.TabGroup.SelectedTab = obj.TabGroup.Children(t); break;
-                end
-            end
             obj.refreshParameterPanel(obj.SelectedKey);
             obj.logMessage(sprintf("Selected: %s", obj.SelectedKey), "info");
         end
@@ -902,7 +1048,9 @@ classdef MeasurementManagerApp < handle
         end
 
         function reconfigurePlotLayout(obj, mode)
-            % 解析网格尺寸
+            wasFlow = strcmp(obj.PlotLayoutMode, 'Flow');
+            isFlow = strcmp(mode, 'Flow');
+
             if strcmp(mode, 'Flow')
                 gridRows = NaN; gridCols = NaN;
             else
@@ -914,19 +1062,27 @@ classdef MeasurementManagerApp < handle
             hasPlots = keys(obj.PlotAxesMap);
             plotParent = obj.PlotTileLayout.Parent;
 
-            % 删除旧布局
-            delete(obj.PlotTileLayout);
-            obj.PlotAxesMap = containers.Map();
+            % 仅在 flow↔fixed 切换时需要重建 tiledlayout
+            needRebuild = (wasFlow ~= isFlow);
 
-            % 创建新布局
-            if isnan(gridRows)
-                obj.PlotTileLayout = tiledlayout(plotParent, 'flow');
+            if needRebuild
+                delete(obj.PlotTileLayout);
+                obj.PlotAxesMap = containers.Map();
+
+                if isnan(gridRows)
+                    obj.PlotTileLayout = tiledlayout(plotParent, 'flow');
+                else
+                    obj.PlotTileLayout = tiledlayout(plotParent, gridRows, gridCols);
+                end
+                obj.PlotTileLayout.Padding = 'compact';
+                obj.PlotTileLayout.TileSpacing = 'compact';
+                title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', obj.FONT_SM);
             else
-                obj.PlotTileLayout = tiledlayout(plotParent, gridRows, gridCols);
+                % 固定网格间切换：直接改 GridSize
+                if ~isnan(gridRows)
+                    obj.PlotTileLayout.GridSize = [gridRows, gridCols];
+                end
             end
-            obj.PlotTileLayout.Padding = 'compact';
-            obj.PlotTileLayout.TileSpacing = 'compact';
-            title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', 12);
 
             obj.PlotLayoutMode = mode;
 
@@ -956,14 +1112,28 @@ classdef MeasurementManagerApp < handle
             end
         end
 
+        function toggleElogCollapse(obj)
+            if obj.ElogCollapsed
+                obj.ElogContentGrid.Visible = 'on';
+                obj.ElogToggleButton.Text = char(9650);  % ▲
+                obj.ElogCollapsed = false;
+                obj.BottomLeftGrid.RowHeight{2} = '1x';
+            else
+                obj.ElogContentGrid.Visible = 'off';
+                obj.ElogToggleButton.Text = char(9660);  % ▼
+                obj.ElogCollapsed = true;
+                obj.BottomLeftGrid.RowHeight{2} = 'fit';
+            end
+        end
+
         function toggleLogCollapse(obj)
             if obj.LogCollapsed
-                obj.MainGrid.ColumnWidth = {'1.5x', '1x', '0.3x'};
+                obj.MainGrid.ColumnWidth = {'1.1x', '1.5x', '0.4x'};
                 obj.ToggleLogButton.Text = 'Hide Log';
                 obj.LogCollapsed = false;
                 obj.logMessage('Log panel expanded.', 'info');
             else
-                obj.MainGrid.ColumnWidth = {'1.5x', '1x', 28};
+                obj.MainGrid.ColumnWidth = {'1.1x', '1.5x', 28};
                 obj.ToggleLogButton.Text = 'Show Log';
                 obj.LogCollapsed = true;
                 obj.logMessage('Log panel collapsed.', 'info');
@@ -1201,15 +1371,15 @@ classdef MeasurementManagerApp < handle
         function onUploadElog(obj, ~, ~)
             if isempty(char(string(obj.LogbookDrop.Value)))
                 obj.ElogStatusLabel.Text = 'Missing logbook';
-                obj.ElogStatusLabel.FontColor = [1, 0, 0]; return;
+                obj.ElogStatusLabel.FontColor = obj.COLOR_DANGER; return;
             end
             if isempty(char(string(obj.AuthorDrop.Value)))
                 obj.ElogStatusLabel.Text = 'Missing author';
-                obj.ElogStatusLabel.FontColor = [1, 0, 0]; return;
+                obj.ElogStatusLabel.FontColor = obj.COLOR_DANGER; return;
             end
 
             obj.ElogStatusLabel.Text = 'Uploading...';
-            obj.ElogStatusLabel.FontColor = [1, 0.6, 0];
+            obj.ElogStatusLabel.FontColor = obj.COLOR_WARNING;
             drawnow;
 
             opts = obj.collectElogParams();
@@ -1224,18 +1394,18 @@ classdef MeasurementManagerApp < handle
                 [success, response] = labdevices.core.DataExporter.uploadToElog(opts);
                 if success
                     obj.ElogStatusLabel.Text = 'Upload OK';
-                    obj.ElogStatusLabel.FontColor = [0, 0.6, 0];
+                    obj.ElogStatusLabel.FontColor = obj.COLOR_SUCCESS;
                     obj.appendElogLog(response, opts);
                     obj.logMessage(sprintf("ELOG upload OK: %s", strtrim(response)), "info");
                 else
                     obj.ElogStatusLabel.Text = 'Upload failed';
-                    obj.ElogStatusLabel.FontColor = [1, 0, 0];
+                    obj.ElogStatusLabel.FontColor = obj.COLOR_DANGER;
                     obj.appendElogLog(response, opts);
                     obj.logMessage(sprintf("ELOG upload failed: %s", response), "error");
                 end
             catch ME
                 obj.ElogStatusLabel.Text = 'Upload error';
-                obj.ElogStatusLabel.FontColor = [1, 0, 0];
+                obj.ElogStatusLabel.FontColor = obj.COLOR_DANGER;
                 obj.appendElogLog(ME.message, opts);
                 obj.logMessage(sprintf("ELOG upload error: %s", ME.message), "error");
             end
@@ -1246,6 +1416,32 @@ classdef MeasurementManagerApp < handle
     methods (Access = private)
         function onFigureClose(obj, ~, ~)
             obj.delete();
+        end
+
+        function onKeyPress(obj, evt)
+            modifiers = evt.Modifier;
+            key = evt.Key;
+            ctrl = any(strcmp(modifiers, 'control'));
+
+            if ctrl
+                switch key
+                    case 'return'
+                        obj.onAcquireAll();
+                    case 's'
+                        obj.onSaveAll();
+                    case 'd'
+                        obj.onDisconnectAll();
+                    case 'l'
+                        obj.toggleLogCollapse();
+                    case 'e'
+                        obj.toggleElogCollapse();
+                    case 'c'
+                        obj.onConnectAll();
+                    otherwise
+                        return;
+                end
+                obj.logMessage(sprintf("Shortcut: Ctrl+%s", upper(key)), "info");
+            end
         end
     end
 
@@ -1278,9 +1474,9 @@ classdef MeasurementManagerApp < handle
             for i = 1:numel(obj.InstrumentKeys)
                 if i <= numel(obj.StatusLamps) && isvalid(obj.StatusLamps(i))
                     if obj.Station.isConnected(obj.InstrumentKeys(i))
-                        obj.StatusLamps(i).Color = [0, 0.8, 0];
+                        obj.StatusLamps(i).Color = obj.COLOR_LAMP_ON;
                     else
-                        obj.StatusLamps(i).Color = [0.55, 0.55, 0.55];
+                        obj.StatusLamps(i).Color = obj.COLOR_LAMP_OFF;
                     end
                 end
             end
@@ -1306,8 +1502,10 @@ classdef MeasurementManagerApp < handle
             obj.IsBusy = tf;
             if tf
                 obj.StatusLabel.Text = [obj.StatusLabel.Text, '  |  BUSY...'];
+                obj.StatusLabel.FontColor = obj.COLOR_WARNING;
                 drawnow;
             else
+                obj.StatusLabel.FontColor = obj.COLOR_TEXT;
                 obj.updateStatusBar();
             end
         end
@@ -1617,7 +1815,7 @@ classdef MeasurementManagerApp < handle
                 end
                 obj.PlotAxesMap(key) = ax;
                 ax.XGrid = 'on'; ax.YGrid = 'on'; ax.Box = 'on';
-                ax.FontSize = 12;
+                ax.FontSize = obj.FONT_SM;
             end
 
             cla(ax); hold(ax, 'on');
@@ -1637,17 +1835,17 @@ classdef MeasurementManagerApp < handle
 
             grid(ax, 'on');
             if numel(data.traces) > 1
-                legend(ax, 'show', 'Location', 'best', 'FontSize', 10);
+                legend(ax, 'show', 'Location', 'best', 'FontSize', obj.FONT_XS);
             end
 
-            xlabel(ax, labdevices.core.DataExporter.pickField(data, 'xunit', 'x'), 'FontSize', 12);
-            ylabel(ax, firstLabel, 'FontSize', 12);
+            xlabel(ax, labdevices.core.DataExporter.pickField(data, 'xunit', 'x'), 'FontSize', obj.FONT_SM);
+            ylabel(ax, firstLabel, 'FontSize', obj.FONT_SM);
 
             titleStr = labdevices.core.DataExporter.pickField(data, 'device', key);
             if isfield(data, 'timestamp')
                 titleStr = [titleStr, '  (', char(data.timestamp), ')'];
             end
-            title(ax, titleStr, 'Interpreter', 'none', 'FontSize', 12);
+            title(ax, titleStr, 'Interpreter', 'none', 'FontSize', obj.FONT_SM);
 
             hold(ax, 'off');
         end
