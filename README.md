@@ -197,19 +197,28 @@ addpath(genpath('E:\project\TestDeviceManager\matlab_unified'));
 
 ## 数据保存格式
 
-统一导出层支持以下格式：
+统一导出层支持以下格式，可按需组合：
 
-- `.mat`
-- `.csv`
-- `.png`
+- `.mat` — 完整数据结构
+- `.csv` — 表格格式（元数据 + 每 trace 独立 CSV）
+- `.png` — 数据图（200 DPI）
 
-这些格式可以按需组合输出。
+## ELOG 电子日志上传
 
-当前暂未接入但已预留：
+已完整接入 ELOG 命令行工具（服务器 192.168.1.72:8080），支持：
 
-- eLog 上传
+- **手动上传**：ELOG 面板填写信息 → Upload → App 截图 PNG + 仪器快照 + 样品标识
+- **自动上传**：勾选 Auto-upload on save → 保存数据时自动附加数据图 PNG
+- **字段**：Server/Port、Logbook（EPIC）、Author、XOI/Design、Wafer/Field/Chip/Sample、Type
 
-等后续拿到 eLog 上传代码或接口后，可以接到统一导出层里。
+## 保存按钮
+
+| 按钮 | 行为 |
+|------|------|
+| **Save All** | 保存内存中全部采集数据，每条独立文件 |
+| **Save Session** | 仅保存每台仪器最新一次采集，合并为单个 .mat |
+| **Save Selected** | 选中表格行后保存对应数据 |
+| **Clear** | 清空内存数据、表格、图表 |
 
 ## 示例
 
