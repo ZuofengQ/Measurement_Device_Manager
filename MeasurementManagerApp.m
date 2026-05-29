@@ -47,6 +47,7 @@ classdef MeasurementManagerApp < handle
         InstrumentKeys      string
         StatusLamps         matlab.ui.control.Lamp
         InstrumentTable     matlab.ui.control.Table
+        LampGrid            matlab.ui.container.GridLayout
 
         % --- 参数面板 ---
         ParamGrid           matlab.ui.container.GridLayout
@@ -59,6 +60,13 @@ classdef MeasurementManagerApp < handle
         PlotTileLayout
         PlotAxesMap         containers.Map
         AcquireParamsMap    containers.Map
+        LastSavedPaths      cell = {}
+
+        % --- 绘图布局控制 ---
+        PlotLayoutMode      string = 'Flow'
+        PlotLayoutDropdown
+        LogCollapsed        logical = false
+        ToggleLogButton
 
         % --- 存储面板 ---
         FolderEdit          matlab.ui.control.EditField
@@ -91,15 +99,15 @@ classdef MeasurementManagerApp < handle
     methods (Access = private)
         function createComponents(obj)
             obj.Figure = uifigure( ...
-                'Name', 'Measurement Device Manager', ...
+                'Name', 'Measurement Device Manager v2', ...
                 'NumberTitle', 'off', ...
-                'Position', [100, 100, 1400, 850], ...
+                'Position', [80, 80, 1560, 920], ...
                 'CloseRequestFcn', @(~,~) obj.onFigureClose(), ...
                 'Resize', 'on');
 
-            obj.MainGrid = uigridlayout(obj.Figure, [3, 2]);
-            obj.MainGrid.RowHeight = {'1.8x', '1.2x', 20};
-            obj.MainGrid.ColumnWidth = {'2x', '3x'};
+            obj.MainGrid = uigridlayout(obj.Figure, [3, 3]);
+            obj.MainGrid.RowHeight = {'1x', '1x', 22};
+            obj.MainGrid.ColumnWidth = {'1.5x', '1x', '0.3x'};
             obj.MainGrid.Padding = [4, 4, 4, 4];
             obj.MainGrid.RowSpacing = 3;
             obj.MainGrid.ColumnSpacing = 3;
@@ -120,40 +128,41 @@ classdef MeasurementManagerApp < handle
             % 表格 + Lamp 并排
             instrTopGrid = uigridlayout(instrumentGrid, [1, 2]);
             instrTopGrid.Layout.Row = 1;
-            instrTopGrid.ColumnWidth = {'1x', 40};
+            instrTopGrid.ColumnWidth = {'1x', 68};
             instrTopGrid.Padding = [0, 0, 0, 0];
-            instrTopGrid.ColumnSpacing = 2;
+            instrTopGrid.ColumnSpacing = 4;
 
             obj.InstrumentTable = uitable(instrTopGrid);
             obj.InstrumentTable.Layout.Column = 1;
             obj.InstrumentTable.ColumnName = {'Instrument', 'Type', 'IP', 'Connect', 'Disconnect', 'Acquire'};
-            obj.InstrumentTable.ColumnWidth = {190, 70, 150, 85, 95, 85};
+            obj.InstrumentTable.ColumnWidth = {175, 60, 135, 78, 88, 78};
             obj.InstrumentTable.ColumnEditable = false(1, 6);
-            obj.InstrumentTable.FontSize = 14;
+            obj.InstrumentTable.FontSize = 13;
             obj.InstrumentTable.CellSelectionCallback = @(~,evt) obj.onInstrumentSelected(evt);
 
             % Lamp 列
-            lampCol = uigridlayout(instrTopGrid, [1, 1]);
-            lampCol.Layout.Column = 2;
-            lampCol.Padding = [0, 2, 0, 2];
-            lampCol.RowSpacing = 0;
-            lampCol.Tag = 'LampColumnGrid';
+            obj.LampGrid = uigridlayout(instrTopGrid, [1, 1]);
+            obj.LampGrid.Layout.Column = 2;
+            obj.LampGrid.Padding = [0, 2, 0, 2];
+            obj.LampGrid.RowSpacing = 0;
+            obj.LampGrid.Tag = 'LampColumnGrid';
             % Lamps created in populateInstrumentRows
 
             % 操作按钮
             buttonGrid = uigridlayout(instrumentGrid, [1, 3]);
             buttonGrid.Layout.Row = 2;
             buttonGrid.Padding = [0, 0, 0, 0];
-            buttonGrid.ColumnSpacing = 6;
+            buttonGrid.ColumnWidth = {'1x', '1x', '1.15x'};
+            buttonGrid.ColumnSpacing = 8;
             buttonGrid.BackgroundColor = [0.94, 0.94, 0.94];
             uibutton(buttonGrid, 'push', ...
-                'Text', 'Connect All', 'FontSize', 14, ...
+                'Text', 'Connect All', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onConnectAll());
             uibutton(buttonGrid, 'push', ...
-                'Text', 'Disconnect All', 'FontSize', 14, ...
+                'Text', 'Disconnect All', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onDisconnectAll());
             uibutton(buttonGrid, 'push', ...
-                'Text', 'Acquire All Connected', 'FontSize', 14, ...
+                'Text', 'Acquire All Connected', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onAcquireAll(), ...
                 'BackgroundColor', [0.2, 0.6, 1.0]);
 
@@ -171,27 +180,60 @@ classdef MeasurementManagerApp < handle
             paramPlaceholder.Layout.Row = 1;
             paramPlaceholder.Layout.Column = 1;
 
-            % --- 右上: 数据绘图 + 采集表格 ---
+            % --- 右上: 数据绘图 + 采集表格 (跨行1-2) ---
             dataPanel = uipanel(obj.MainGrid, 'Title', 'Live Data View', 'FontSize', 14);
-            dataPanel.Layout.Row = 1;
+            dataPanel.Layout.Row = [1, 2];
             dataPanel.Layout.Column = 2;
             dataGrid = uigridlayout(dataPanel, [2, 1]);
             dataGrid.RowHeight = {'3x', '1x'};
             dataGrid.Padding = [4, 4, 4, 4];
-            dataGrid.RowSpacing = 3;
+            dataGrid.RowSpacing = 4;
 
-            plotPanel = uipanel(dataGrid, 'BorderType', 'none');
-            plotPanel.Layout.Row = 1;
+            % 绘图容器: 工具栏 + tile 区域
+            plotContainer = uigridlayout(dataGrid, [2, 1]);
+            plotContainer.Layout.Row = 1;
+            plotContainer.RowHeight = {28, '1x'};
+            plotContainer.Padding = [0, 0, 0, 0];
+            plotContainer.RowSpacing = 2;
+
+            % 工具栏 (行1)
+            toolbarGrid = uigridlayout(plotContainer, [1, 5]);
+            toolbarGrid.Layout.Row = 1;
+            toolbarGrid.ColumnWidth = {22, 42, 'fit', '1x', 88};
+            toolbarGrid.Padding = [0, 0, 0, 0];
+            toolbarGrid.ColumnSpacing = 4;
+
+            uilabel(toolbarGrid, 'Text', char(9776), 'FontSize', 14, ...
+                'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+
+            uilabel(toolbarGrid, 'Text', 'Layout:', 'FontSize', 12, ...
+                'HorizontalAlignment', 'right');
+            obj.PlotLayoutDropdown = uidropdown(toolbarGrid, ...
+                'Items', {'Flow', '1x1', '2x1', '1x2', '2x2', '3x2', '3x3'}, ...
+                'Value', 'Flow', ...
+                'FontSize', 12, ...
+                'ValueChangedFcn', @(~,evt) obj.onPlotLayoutChanged(evt));
+
+            obj.ToggleLogButton = uibutton(toolbarGrid, 'push', ...
+                'Text', 'Hide Log', ...
+                'FontSize', 11, ...
+                'ButtonPushedFcn', @(~,~) obj.toggleLogCollapse());
+            obj.ToggleLogButton.Layout.Column = 5;
+
+            % 绘图 tile 区域 (行2)
+            plotPanel = uipanel(plotContainer, 'BorderType', 'none');
+            plotPanel.Layout.Row = 2;
             obj.PlotTileLayout = tiledlayout(plotPanel, 'flow');
             obj.PlotTileLayout.Padding = 'compact';
             obj.PlotTileLayout.TileSpacing = 'compact';
             title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', 12);
 
+            % 采集表格 (行2)
             obj.AcquisitionTable = uitable(dataGrid);
             obj.AcquisitionTable.Layout.Row = 2;
             obj.AcquisitionTable.ColumnName = {'Device', 'Type', 'Timestamp', 'Traces', 'Status'};
             obj.AcquisitionTable.ColumnWidth = {90, 55, 130, 55, 60};
-            obj.AcquisitionTable.FontSize = 14;
+            obj.AcquisitionTable.FontSize = 13;
             obj.AcquisitionTable.Data = cell(0, 5);
             obj.AcquisitionTable.CellSelectionCallback = @(~,evt) obj.onDataRowSelected(evt);
 
@@ -199,23 +241,23 @@ classdef MeasurementManagerApp < handle
             bottomLeft = uigridlayout(obj.MainGrid, [2, 1]);
             bottomLeft.Layout.Row = 2;
             bottomLeft.Layout.Column = 1;
-            bottomLeft.RowHeight = {'1x', '1.5x'};
-            bottomLeft.RowSpacing = 3;
+            bottomLeft.RowHeight = {'fit', '1x'};
+            bottomLeft.RowSpacing = 4;
             bottomLeft.Padding = [0, 0, 0, 0];
 
             obj.buildStoragePanel(bottomLeft);
             obj.buildElogPanel(bottomLeft);
 
-            % --- 右下: 状态日志 ---
+            % --- 右列: 状态日志 (跨行1-2, 窄列) ---
             logPanel = uipanel(obj.MainGrid, 'Title', 'Status Log', 'FontSize', 14);
-            logPanel.Layout.Row = 2;
-            logPanel.Layout.Column = 2;
+            logPanel.Layout.Row = [1, 2];
+            logPanel.Layout.Column = 3;
             logGrid = uigridlayout(logPanel, [1, 1]);
-            logGrid.Padding = [4, 4, 4, 4];
+            logGrid.Padding = [3, 3, 3, 3];
 
             obj.LogArea = uitextarea(logGrid, ...
                 'Editable', 'off', ...
-                'FontSize', 12, ...
+                'FontSize', 11, ...
                 'WordWrap', 'on', ...
                 'Value', '');
 
@@ -225,7 +267,7 @@ classdef MeasurementManagerApp < handle
                 'FontSize', 11, ...
                 'HorizontalAlignment', 'left');
             obj.StatusLabel.Layout.Row = 3;
-            obj.StatusLabel.Layout.Column = [1, 2];
+            obj.StatusLabel.Layout.Column = [1, 3];
         end
 
         function buildStoragePanel(obj, parent)
@@ -233,8 +275,8 @@ classdef MeasurementManagerApp < handle
             panel.Layout.Row = 1;
             panel.Layout.Column = 1;
 
-            storageGrid = uigridlayout(panel, [3, 5]);
-            storageGrid.RowHeight = {'fit', 'fit', 'fit'};
+            storageGrid = uigridlayout(panel, [4, 5]);
+            storageGrid.RowHeight = {24, 24, 24, 32};
             storageGrid.ColumnWidth = {'fit', '1x', 'fit', 'fit', 'fit'};
             storageGrid.Padding = [4, 4, 4, 4];
             storageGrid.RowSpacing = 3;
@@ -243,10 +285,12 @@ classdef MeasurementManagerApp < handle
             % 文件夹行
             uilabel(storageGrid, 'Text', 'Folder:', 'FontSize', 14);
             obj.FolderEdit = uieditfield(storageGrid, 'text', ...
-                'Value', obj.Config.Folder, 'FontSize', 14, 'Editable', 'on');
+                'Value', obj.Config.Folder, 'FontSize', 13, 'Editable', 'on');
             obj.FolderEdit.Layout.Column = [2, 4];
-            uibutton(storageGrid, 'push', 'Text', 'Browse', 'FontSize', 14, ...
+            browseButton = uibutton(storageGrid, 'push', 'Text', 'Browse', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onBrowseFolder());
+            browseButton.Layout.Row = 1;
+            browseButton.Layout.Column = 5;
 
             % 格式选择行
             uilabel(storageGrid, 'Text', 'Formats:', 'FontSize', 14);
@@ -255,21 +299,29 @@ classdef MeasurementManagerApp < handle
             formatSubGrid.ColumnWidth = {'fit', 'fit', 'fit'};
             formatSubGrid.Padding = [0, 0, 0, 0];
             formatSubGrid.ColumnSpacing = 10;
-            obj.MatCheck = uicheckbox(formatSubGrid, 'Text', 'MAT', 'FontSize', 14, 'Value', true);
-            obj.CsvCheck = uicheckbox(formatSubGrid, 'Text', 'CSV', 'FontSize', 14, 'Value', true);
-            obj.PngCheck = uicheckbox(formatSubGrid, 'Text', 'PNG', 'FontSize', 14, 'Value', false);
+            obj.MatCheck = uicheckbox(formatSubGrid, 'Text', 'MAT', 'FontSize', 13, 'Value', true);
+            obj.CsvCheck = uicheckbox(formatSubGrid, 'Text', 'CSV', 'FontSize', 13, 'Value', true);
+            obj.PngCheck = uicheckbox(formatSubGrid, 'Text', 'PNG', 'FontSize', 13, 'Value', false);
 
             % 操作行
             obj.AutoSaveCheck = uicheckbox(storageGrid, ...
-                'Text', 'Auto-save after acquire', 'FontSize', 14, 'Value', true);
+                'Text', 'Auto-save after acquire', 'FontSize', 13, 'Value', true);
             obj.AutoSaveCheck.Layout.Column = [1, 2];
-            uibutton(storageGrid, 'push', 'Text', 'Save All', 'FontSize', 14, ...
+            obj.AutoSaveCheck.Layout.Row = 3;
+
+            saveAllButton = uibutton(storageGrid, 'push', 'Text', 'Save All', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveAll());
-            uibutton(storageGrid, 'push', 'Text', 'Save Session', 'FontSize', 14, ...
+            saveSessionButton = uibutton(storageGrid, 'push', 'Text', 'Save Session', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveSession(), ...
                 'BackgroundColor', [0.0, 0.5, 0.2]);
-            uibutton(storageGrid, 'push', 'Text', 'Save Selected', 'FontSize', 14, ...
+            saveSelectedButton = uibutton(storageGrid, 'push', 'Text', 'Save Selected', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveSelected());
+            saveAllButton.Layout.Row = 4;
+            saveAllButton.Layout.Column = 1;
+            saveSessionButton.Layout.Row = 4;
+            saveSessionButton.Layout.Column = 3;
+            saveSelectedButton.Layout.Row = 4;
+            saveSelectedButton.Layout.Column = 5;
         end
 
         function buildElogPanel(obj, parent)
@@ -277,70 +329,81 @@ classdef MeasurementManagerApp < handle
             panel.Layout.Row = 2;
             panel.Layout.Column = 1;
 
-            elogGrid = uigridlayout(panel, [8, 3]);
-            elogGrid.RowHeight = repmat({'fit'}, 1, 8);
+            elogGrid = uigridlayout(panel, [9, 3]);
+            elogGrid.RowHeight = {24, 24, 24, 24, 24, 62, 24, 32, 18};
             elogGrid.ColumnWidth = {'fit', '1x', 'fit'};
             elogGrid.Padding = [4, 4, 4, 4];
             elogGrid.RowSpacing = 2;
             elogGrid.ColumnSpacing = 4;
 
             % 1: Server : Port
-            uilabel(elogGrid, 'Text', 'Server:', 'FontSize', 14);
+            uilabel(elogGrid, 'Text', 'Server:', 'FontSize', 13);
             obj.ServerEdit = uieditfield(elogGrid, 'text', ...
-                'Value', obj.Config.ElogServer, 'FontSize', 14);
-            uilabel(elogGrid, 'Text', 'Port:', 'FontSize', 14);
+                'Value', obj.Config.ElogServer, 'FontSize', 13);
+            uilabel(elogGrid, 'Text', 'Port:', 'FontSize', 13);
             obj.ServerEdit.Layout.Column = 2;
             obj.PortEdit = uieditfield(elogGrid, 'numeric', ...
-                'Value', obj.Config.ElogPort, 'FontSize', 14, ...
+                'Value', obj.Config.ElogPort, 'FontSize', 13, ...
                 'Limits', [1, 65535], 'RoundFractionalValues', 'on');
             obj.PortEdit.Layout.Column = 3;
 
             % 2: Logbook
-            uilabel(elogGrid, 'Text', 'Logbook:', 'FontSize', 14);
-            obj.LogbookDrop = uidropdown(elogGrid, 'FontSize', 14, ...
-                'Items', obj.Config.ElogLogbooks, ...
-                'Value', obj.Config.ElogLogbooks{1}, 'Editable', 'on');
+            uilabel(elogGrid, 'Text', 'Logbook:', 'FontSize', 13);
+            obj.LogbookDrop = uidropdown(elogGrid, 'FontSize', 13, ...
+                'Items', cellstr(string(obj.Config.ElogLogbooks)), ...
+                'Value', obj.pickDropDownValue(obj.Config.ElogLogbooks, ...
+                    obj.Config.ElogSelectedLogbook), ...
+                'Editable', 'on');
             obj.LogbookDrop.Layout.Column = [2, 3];
 
             % 3: Author
-            uilabel(elogGrid, 'Text', 'Author:', 'FontSize', 14);
-            obj.AuthorDrop = uidropdown(elogGrid, 'FontSize', 14, ...
-                'Items', obj.Config.ElogAuthors, ...
-                'Value', obj.Config.ElogAuthors{1}, 'Editable', 'on');
+            uilabel(elogGrid, 'Text', 'Author:', 'FontSize', 13);
+            obj.AuthorDrop = uidropdown(elogGrid, 'FontSize', 13, ...
+                'Items', cellstr(string(obj.Config.ElogAuthors)), ...
+                'Value', obj.pickDropDownValue(obj.Config.ElogAuthors, ...
+                    obj.Config.ElogSelectedAuthor), ...
+                'Editable', 'on');
             obj.AuthorDrop.Layout.Column = [2, 3];
 
             % 4: Sample
-            uilabel(elogGrid, 'Text', 'Sample:', 'FontSize', 14);
-            obj.SampleEdit = uieditfield(elogGrid, 'text', 'FontSize', 14, 'Value', '');
+            uilabel(elogGrid, 'Text', 'Sample:', 'FontSize', 13);
+            obj.SampleEdit = uieditfield(elogGrid, 'text', 'FontSize', 13, 'Value', '');
             obj.SampleEdit.Layout.Column = [2, 3];
 
             % 5: Measurement
-            uilabel(elogGrid, 'Text', 'Measurement:', 'FontSize', 14);
-            obj.MeasurementEdit = uieditfield(elogGrid, 'text', 'FontSize', 14, 'Value', '');
+            uilabel(elogGrid, 'Text', 'Measurement:', 'FontSize', 13);
+            obj.MeasurementEdit = uieditfield(elogGrid, 'text', 'FontSize', 13, 'Value', '');
             obj.MeasurementEdit.Layout.Column = [2, 3];
 
             % 6: Comments
-            uilabel(elogGrid, 'Text', 'Comments:', 'FontSize', 14);
-            obj.CommentsArea = uitextarea(elogGrid, 'FontSize', 14, ...
+            uilabel(elogGrid, 'Text', 'Comments:', 'FontSize', 13);
+            obj.CommentsArea = uitextarea(elogGrid, 'FontSize', 13, ...
                 'Value', '', 'Placeholder', 'Enter comments for the ELOG entry...');
             obj.CommentsArea.Layout.Column = [2, 3];
 
             % 7: Note
-            uilabel(elogGrid, 'Text', 'Note:', 'FontSize', 14);
-            obj.NoteEdit = uieditfield(elogGrid, 'text', 'FontSize', 14, ...
+            uilabel(elogGrid, 'Text', 'Note:', 'FontSize', 13);
+            obj.NoteEdit = uieditfield(elogGrid, 'text', 'FontSize', 13, ...
                 'Value', '', 'Placeholder', 'Additional note / remarks');
             obj.NoteEdit.Layout.Column = [2, 3];
 
             % 8: Upload row
             obj.AttachSnapshotCheck = uicheckbox(elogGrid, ...
-                'Text', 'Attach instrument snapshot', 'FontSize', 14, 'Value', true);
+                'Text', 'Attach app snapshot (.png)', 'FontSize', 13, 'Value', true);
             obj.AttachSnapshotCheck.Layout.Column = [1, 2];
-            uibutton(elogGrid, 'push', ...
-                'Text', 'Upload to ELOG', 'FontSize', 14, ...
+            obj.AttachSnapshotCheck.Layout.Row = 8;
+
+            uploadButton = uibutton(elogGrid, 'push', ...
+                'Text', 'Upload to ELOG', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onUploadElog(), ...
                 'BackgroundColor', [0.1, 0.4, 0.8]);
+            uploadButton.Layout.Row = 8;
+            uploadButton.Layout.Column = 3;
+
             obj.ElogStatusLabel = uilabel(elogGrid, ...
                 'Text', 'Idle', 'FontSize', 12, 'FontColor', [0.5, 0.5, 0.5]);
+            obj.ElogStatusLabel.Layout.Row = 9;
+            obj.ElogStatusLabel.Layout.Column = [1, 3];
         end
 
         function populateInstrumentRows(obj)
@@ -366,18 +429,21 @@ classdef MeasurementManagerApp < handle
 
             % 创建 Lamp 控件（在 instrTopGrid 的 lampCol 中）
             % 找到 lamp 列 grid（通过 Tag 查找）
-            lampParent = obj.InstrumentTable.Parent;
-            lampCol = findobj(lampParent.Children, 'flat', 'Tag', 'LampColumnGrid');
-            if ~isempty(lampCol) && isa(lampCol, 'matlab.ui.container.GridLayout')
+            lampCol = obj.LampGrid;
+            if ~isempty(lampCol) && isvalid(lampCol)
                 % 清除旧内容，重建
                 delete(lampCol.Children);
                 % 首行留空给表头偏移，后续每行一个 lamp
                 lampCol.RowHeight = [{'1x'}, repmat({'1x'}, 1, nInstruments)];
+                lampCol.ColumnWidth = {'1x'};
+                lampCol.Padding = [0, 6, 0, 6];
                 obj.StatusLamps = matlab.ui.control.Lamp.empty();
                 for i = 1:nInstruments
                     obj.StatusLamps(i) = uilamp(lampCol, ...
                         'Color', [0.55, 0.55, 0.55]);
                     obj.StatusLamps(i).Layout.Row = i + 1;
+                    obj.StatusLamps(i).Layout.Column = 1;
+                    obj.StatusLamps(i).Position(3:4) = [18 18];
                 end
             end
         end
@@ -776,6 +842,83 @@ classdef MeasurementManagerApp < handle
             obj.logMessage(sprintf("Plotting: %s (row %d)", deviceName, row), "info");
         end
 
+        %% ---- 绘图布局控制 ----
+        function onPlotLayoutChanged(obj, evt)
+            mode = evt.Value;
+            if strcmp(mode, obj.PlotLayoutMode); return; end
+            obj.logMessage(sprintf("Switching plot layout to: %s", mode), "info");
+            obj.reconfigurePlotLayout(mode);
+        end
+
+        function reconfigurePlotLayout(obj, mode)
+            % 解析网格尺寸
+            if strcmp(mode, 'Flow')
+                gridRows = NaN; gridCols = NaN;
+            else
+                parts = split(mode, 'x');
+                gridRows = str2double(parts{1});
+                gridCols = str2double(parts{2});
+            end
+
+            hasPlots = keys(obj.PlotAxesMap);
+            plotParent = obj.PlotTileLayout.Parent;
+
+            % 删除旧布局
+            delete(obj.PlotTileLayout);
+            obj.PlotAxesMap = containers.Map();
+
+            % 创建新布局
+            if isnan(gridRows)
+                obj.PlotTileLayout = tiledlayout(plotParent, 'flow');
+            else
+                obj.PlotTileLayout = tiledlayout(plotParent, gridRows, gridCols);
+            end
+            obj.PlotTileLayout.Padding = 'compact';
+            obj.PlotTileLayout.TileSpacing = 'compact';
+            title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', 12);
+
+            obj.PlotLayoutMode = mode;
+
+            % 恢复已有绘图
+            if ~isempty(hasPlots) && ~isempty(obj.AcquisitionStore)
+                replotCount = 0;
+                maxTiles = gridRows * gridCols;
+
+                for i = 1:numel(obj.AcquisitionStore)
+                    entry = obj.AcquisitionStore{i};
+                    key = entry{1}; data = entry{2};
+                    if any(strcmp(hasPlots, key))
+                        if ~isnan(maxTiles) && replotCount >= maxTiles
+                            obj.logMessage(sprintf( ...
+                                "Grid %s has only %d tiles; remaining plots not shown.", mode, maxTiles), "warn");
+                            break;
+                        end
+                        obj.plotAcquisitionData(key, data);
+                        replotCount = replotCount + 1;
+                    end
+                end
+
+                if replotCount > 0
+                    obj.logMessage(sprintf( ...
+                        "Layout %s: %d plot(s) redistributed.", mode, replotCount), "info");
+                end
+            end
+        end
+
+        function toggleLogCollapse(obj)
+            if obj.LogCollapsed
+                obj.MainGrid.ColumnWidth = {'1.5x', '1x', '0.3x'};
+                obj.ToggleLogButton.Text = 'Hide Log';
+                obj.LogCollapsed = false;
+                obj.logMessage('Log panel expanded.', 'info');
+            else
+                obj.MainGrid.ColumnWidth = {'1.5x', '1x', 28};
+                obj.ToggleLogButton.Text = 'Show Log';
+                obj.LogCollapsed = true;
+                obj.logMessage('Log panel collapsed.', 'info');
+            end
+        end
+
         %% ---- 参数分流辅助方法 ----
         function [configArgs, acquireArgs] = splitAcquireParams(obj, allArgs, key)
             configArgs = {}; acquireArgs = {};
@@ -902,10 +1045,11 @@ classdef MeasurementManagerApp < handle
                 combined.(fieldName) = data;
             end
 
-            ts = datestr(now, 'yyyy_mm_dd_HH_MM');
-            matPath = fullfile(obj.FolderEdit.Value, ['session_' ts '.mat']);
+            ts = datetime("now", "Format", "yyyy_MM_dd-HH_mm");
+            matPath = fullfile(obj.FolderEdit.Value, ['session_' char(ts) '.mat']);
             if ~isfolder(obj.FolderEdit.Value); mkdir(obj.FolderEdit.Value); end
             save(matPath, "-struct", "combined", "-v7.3");
+            obj.rememberSavedFiles({matPath});
             obj.logMessage(sprintf("Session saved: %s (%d instruments)", ...
                 matPath, numel(fieldnames(combined))), "info");
         end
@@ -922,7 +1066,8 @@ classdef MeasurementManagerApp < handle
             if isempty(formats); obj.logMessage("No formats selected.", "warn"); saved = struct(); return; end
 
             saved = labdevices.core.DataExporter.saveAcquisition(data, ...
-                'Folder', obj.FolderEdit.Value, 'Formats', formats);
+                'Folder', obj.resolveInstrumentSaveFolder(data), 'Formats', formats);
+            obj.rememberSavedFiles(saved);
             if isfield(saved, 'mat')
                 obj.logMessage(sprintf("Saved: %s", saved.mat), "info");
             end
@@ -945,39 +1090,41 @@ classdef MeasurementManagerApp < handle
             drawnow;
 
             opts = struct();
+            opts.Executable = char(string(obj.Config.ElogExecutable));
             opts.Server = char(string(obj.ServerEdit.Value));
             opts.Port = obj.PortEdit.Value;
             opts.Logbook = logbook;
             opts.Author = author;
             opts.Sample = char(string(obj.SampleEdit.Value));
             opts.Measurement = char(string(obj.MeasurementEdit.Value));
-            opts.Type = 'ManualSave';
-            opts.Comments = char(string(obj.CommentsArea.Value));
+            opts.Type = 'MeasurementManager';
+            opts.Comments = obj.buildElogBodyText();
 
             % 追加 Note 到 Comments
-            noteStr = char(string(obj.NoteEdit.Value));
-            if ~isempty(noteStr)
-                opts.Comments = [opts.Comments, newline, '--- Note ---', newline, noteStr];
-            end
-
             if obj.AttachSnapshotCheck.Value
                 opts.Snapshot = obj.Station.getSnapshot();
             end
+
+            [opts.Attachments, cleanupPaths] = obj.createElogAttachments();
+            cleanupObj = onCleanup(@() obj.cleanupTemporaryFiles(cleanupPaths)); %#ok<NASGU>
 
             try
                 [success, response] = labdevices.core.DataExporter.uploadToElog(opts);
                 if success
                     obj.ElogStatusLabel.Text = 'Upload OK';
                     obj.ElogStatusLabel.FontColor = [0, 0.6, 0];
+                    obj.appendElogLog(response, opts);
                     obj.logMessage(sprintf("ELOG upload OK: %s", strtrim(response)), "info");
                 else
                     obj.ElogStatusLabel.Text = 'Upload failed';
                     obj.ElogStatusLabel.FontColor = [1, 0, 0];
+                    obj.appendElogLog(response, opts);
                     obj.logMessage(sprintf("ELOG upload failed: %s", response), "error");
                 end
             catch ME
                 obj.ElogStatusLabel.Text = 'Upload error';
                 obj.ElogStatusLabel.FontColor = [1, 0, 0];
+                obj.appendElogLog(ME.message, opts);
                 obj.logMessage(sprintf("ELOG upload error: %s", ME.message), "error");
             end
         end
@@ -1056,10 +1203,13 @@ classdef MeasurementManagerApp < handle
         function config = loadConfig(~, configPath)
             config = struct();
             config.Folder = fullfile(fileparts(mfilename('fullpath')), 'output');
-            config.ElogServer = 'lpqm1srv2.epfl.ch';
+            config.ElogServer = '192.168.1.72';
             config.ElogPort = 8081;
             config.ElogLogbooks = {'LabLog', 'MeasurementLog'};
             config.ElogAuthors = {'User', 'Operator'};
+            config.ElogSelectedLogbook = '';
+            config.ElogSelectedAuthor = '';
+            config.ElogExecutable = 'E:\Program Files (x86)\ELOG\elog.exe';
 
             if isfile(configPath)
                 try
@@ -1073,6 +1223,13 @@ classdef MeasurementManagerApp < handle
                 catch
                 end
             end
+
+            if isfield(config, 'ElogServer')
+                currentServer = char(string(config.ElogServer));
+                if any(strcmpi(currentServer, {'lpqm1srv2.epfl.ch', '192.168.1.9'}))
+                    config.ElogServer = '192.168.1.72';
+                end
+            end
         end
 
         function saveConfig(obj)
@@ -1080,9 +1237,208 @@ classdef MeasurementManagerApp < handle
             appConfig.Folder = obj.FolderEdit.Value;
             appConfig.ElogServer = obj.ServerEdit.Value;
             appConfig.ElogPort = obj.PortEdit.Value;
+            appConfig.ElogLogbooks = cellstr(string(obj.LogbookDrop.Items));
+            appConfig.ElogAuthors = cellstr(string(obj.AuthorDrop.Items));
+            appConfig.ElogSelectedLogbook = char(string(obj.LogbookDrop.Value));
+            appConfig.ElogSelectedAuthor = char(string(obj.AuthorDrop.Value));
+            appConfig.ElogExecutable = obj.Config.ElogExecutable;
             folder = fileparts(obj.ConfigPath);
             if ~isempty(folder) && ~isfolder(folder); mkdir(folder); end
             save(obj.ConfigPath, 'appConfig');
+        end
+
+        function value = pickDropDownValue(~, items, preferred)
+            items = cellstr(string(items));
+            preferred = char(string(preferred));
+            if isempty(items)
+                value = '';
+            elseif ~isempty(preferred) && any(strcmp(items, preferred))
+                value = preferred;
+            else
+                value = items{1};
+            end
+        end
+
+        function body = buildElogBodyText(obj)
+            sections = {};
+
+            commentText = obj.textValueToBlock(obj.CommentsArea.Value);
+            if ~isempty(commentText)
+                sections{end + 1} = sprintf('Comments:\\n%s', commentText); %#ok<AGROW>
+            end
+
+            noteText = strtrim(char(string(obj.NoteEdit.Value)));
+            if ~isempty(noteText)
+                sections{end + 1} = sprintf('Note:\\n%s', ...
+                    labdevices.core.DataExporter.escapeElogText(noteText)); %#ok<AGROW>
+            end
+
+            savedSummary = obj.buildSavedFilesSummary();
+            if ~isempty(savedSummary)
+                sections{end + 1} = savedSummary; %#ok<AGROW>
+            end
+
+            if isempty(sections)
+                body = ' ';
+            else
+                body = strjoin(sections, sprintf('\\n\\n'));
+            end
+        end
+
+        function text = textValueToBlock(~, value)
+            if isempty(value)
+                text = '';
+                return;
+            end
+
+            if iscell(value)
+                lines = string(value(:));
+            elseif isstring(value)
+                lines = value(:);
+            else
+                lines = string(value);
+            end
+
+            lines = lines(strlength(strtrim(lines)) > 0);
+            if isempty(lines)
+                text = '';
+                return;
+            end
+
+            escaped = arrayfun(@(s) string(labdevices.core.DataExporter.escapeElogText(char(s))), ...
+                lines, 'UniformOutput', true);
+            text = strjoin(cellstr(escaped), sprintf('\\n'));
+        end
+
+        function summary = buildSavedFilesSummary(obj)
+            if isempty(obj.LastSavedPaths)
+                summary = '';
+                return;
+            end
+
+            existing = obj.LastSavedPaths(cellfun(@(p) isfile(p), obj.LastSavedPaths));
+            if isempty(existing)
+                summary = '';
+                return;
+            end
+
+            maxCount = min(6, numel(existing));
+            lines = cell(1, maxCount + 1);
+            lines{1} = 'Saved files:';
+            for i = 1:maxCount
+                lines{i + 1} = sprintf('- %s', ...
+                    labdevices.core.DataExporter.escapeElogText(existing{i}));
+            end
+            summary = strjoin(lines, sprintf('\\n'));
+        end
+
+        function rememberSavedFiles(obj, saved)
+            paths = {};
+
+            if isstruct(saved)
+                if isfield(saved, 'mat') && ~isempty(saved.mat)
+                    paths{end + 1} = char(string(saved.mat)); %#ok<AGROW>
+                end
+                if isfield(saved, 'png') && ~isempty(saved.png)
+                    paths{end + 1} = char(string(saved.png)); %#ok<AGROW>
+                end
+                if isfield(saved, 'csv') && ~isempty(saved.csv)
+                    csvPaths = saved.csv;
+                    if ischar(csvPaths) || isstring(csvPaths)
+                        paths = [paths, cellstr(string(csvPaths))']; %#ok<AGROW>
+                    elseif iscell(csvPaths)
+                        paths = [paths, cellstr(string(csvPaths))']; %#ok<AGROW>
+                    end
+                end
+            elseif iscell(saved)
+                paths = cellfun(@(p) char(string(p)), saved, 'UniformOutput', false);
+            elseif ischar(saved) || isstring(saved)
+                paths = {char(string(saved))};
+            end
+
+            if isempty(paths)
+                return;
+            end
+
+            obj.LastSavedPaths = [paths(:)', obj.LastSavedPaths];
+            obj.LastSavedPaths = unique(obj.LastSavedPaths, 'stable');
+            if numel(obj.LastSavedPaths) > 20
+                obj.LastSavedPaths = obj.LastSavedPaths(1:20);
+            end
+        end
+
+        function [attachments, cleanupPaths] = createElogAttachments(obj)
+            attachments = {};
+            cleanupPaths = {};
+
+            if ~obj.AttachSnapshotCheck.Value
+                return;
+            end
+
+            snapshotPath = fullfile(tempdir, sprintf('measurement_manager_elog_%s.png', ...
+                char(datetime("now", "Format", "yyyyMMdd_HHmmss_SSS"))));
+            try
+                try
+                    exportapp(obj.Figure, snapshotPath);
+                catch
+                    exportgraphics(obj.Figure, snapshotPath, 'Resolution', 150);
+                end
+            catch
+                return;
+            end
+
+            if isfile(snapshotPath)
+                attachments{end + 1} = snapshotPath; %#ok<AGROW>
+                cleanupPaths{end + 1} = snapshotPath; %#ok<AGROW>
+            end
+        end
+
+        function cleanupTemporaryFiles(~, paths)
+            for i = 1:numel(paths)
+                try
+                    if isfile(paths{i})
+                        delete(paths{i});
+                    end
+                catch
+                end
+            end
+        end
+
+        function folder = resolveInstrumentSaveFolder(obj, data)
+            baseFolder = strtrim(char(string(obj.FolderEdit.Value)));
+            deviceName = 'acquisition';
+            if isfield(data, 'device') && ~isempty(data.device)
+                deviceName = char(string(data.device));
+            end
+            dateFolder = char(datetime("now", "Format", "yyyy_MM_dd"));
+            folder = fullfile(baseFolder, deviceName, dateFolder);
+            if ~isfolder(folder)
+                mkdir(folder);
+            end
+        end
+
+        function appendElogLog(obj, response, opts)
+            logFolder = fullfile(obj.FolderEdit.Value, '_elog_log');
+            if ~isfolder(logFolder)
+                mkdir(logFolder);
+            end
+
+            stamp = char(datetime("now", "Format", "yyyy_MM_dd-HH_mm_ss_SSS"));
+            logPath = fullfile(logFolder, ['elog_' stamp '.txt']);
+            fid = fopen(logPath, 'w');
+            if fid < 0
+                return;
+            end
+
+            cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
+            fprintf(fid, 'Time: %s\n', char(datetime("now", "Format", "yyyy-MM-dd HH:mm:ss.SSS")));
+            fprintf(fid, 'Server: %s:%d\n', char(string(opts.Server)), opts.Port);
+            fprintf(fid, 'Logbook: %s\n', opts.Logbook);
+            fprintf(fid, 'Author: %s\n', opts.Author);
+            fprintf(fid, 'Sample: %s\n', opts.Sample);
+            fprintf(fid, 'Measurement: %s\n', opts.Measurement);
+            fprintf(fid, 'Type: %s\n', opts.Type);
+            fprintf(fid, 'Result: %s\n', strtrim(char(string(response))));
         end
 
         function plotAcquisitionData(obj, key, data)
@@ -1092,7 +1448,13 @@ classdef MeasurementManagerApp < handle
             if obj.PlotAxesMap.isKey(key)
                 ax = obj.PlotAxesMap(key);
             else
-                ax = nexttile(obj.PlotTileLayout);
+                try
+                    ax = nexttile(obj.PlotTileLayout);
+                catch
+                    obj.logMessage(sprintf( ...
+                        "No free tile for: %s. Change layout or use Flow.", key), "warn");
+                    return;
+                end
                 obj.PlotAxesMap(key) = ax;
                 ax.XGrid = 'on'; ax.YGrid = 'on'; ax.Box = 'on';
                 ax.FontSize = 12;

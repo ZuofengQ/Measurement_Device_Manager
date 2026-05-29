@@ -16,3 +16,6 @@ app_config.mat
 .vscode/
 .idea/
 *.code-workspace
+
+# lean-ctx internal cache
+.lean-ctx/

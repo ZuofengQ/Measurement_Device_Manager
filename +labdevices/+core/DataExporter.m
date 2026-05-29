@@ -339,7 +339,7 @@ classdef DataExporter
             %   response - 服务器响应体字符串
 
             arguments
-                opts.Server      char = 'lpqm1srv2.epfl.ch'
+                opts.Server      char = '192.168.1.72'
                 opts.Port        double = 8081
                 opts.Logbook     char = ''
                 opts.Author      char = ''
@@ -348,101 +348,203 @@ classdef DataExporter
                 opts.Type        char = 'ManualSave'
                 opts.Comments    char = ''
                 opts.Snapshot    struct = struct()
-                opts.Attachment  char = ''
+                opts.Attachment = {}
+                opts.Attachments = {}
+                opts.Executable char = ''
+                opts.AdditionalAttributes struct = struct()
             end
 
             % Validate required fields
-            if isempty(opts.Logbook)
+            if isempty(strtrim(opts.Logbook))
                 error("labdevices:ElogMissingLogbook", ...
                     "ELOG upload requires a Logbook name.");
             end
-            if isempty(opts.Author)
+            if isempty(strtrim(opts.Author))
                 error("labdevices:ElogMissingAuthor", ...
                     "ELOG upload requires an Author.");
             end
 
-            % Build URL
-            server = strtrim(opts.Server);
-            logbook = strtrim(opts.Logbook);
-            url = sprintf("http://%s:%d/%s", server, opts.Port, logbook);
+            executable = labdevices.core.DataExporter.resolveElogExecutable(opts.Executable);
+            textBody = labdevices.core.DataExporter.composeElogBody(opts.Comments, opts.Snapshot);
+            attachments = labdevices.core.DataExporter.normalizeElogAttachments( ...
+                opts.Attachment, opts.Attachments);
 
-            % Build text body (comments + optional snapshot)
-            textBody = opts.Comments;
-
-            % Append instrument snapshot as formatted table
-            if ~isempty(fieldnames(opts.Snapshot))
-                textBody = [textBody, newline, newline, ...
-                    '--- Instrument Snapshot ---', newline]; %#ok<AGROW>
-
-                if isfield(opts.Snapshot, 'timestamp')
-                    textBody = [textBody, 'Timestamp: ', ...
-                        opts.Snapshot.timestamp, newline]; %#ok<AGROW>
-                end
-
-                if isfield(opts.Snapshot, 'instruments')
-                    textBody = [textBody, 'Instruments:', newline]; %#ok<AGROW>
-                    for i = 1:numel(opts.Snapshot.instruments)
-                        inst = opts.Snapshot.instruments(i);
-                        nameStr = '';
-                        idnStr = '';
-                        resStr = '';
-                        connStr = 'No';
-                        if isfield(inst, 'name')
-                            nameStr = inst.name;
-                        end
-                        if isfield(inst, 'idn')
-                            idnStr = inst.idn;
-                        end
-                        if isfield(inst, 'resourceName')
-                            resStr = inst.resourceName;
-                        end
-                        if isfield(inst, 'connected') && inst.connected
-                            connStr = 'Yes';
-                        end
-                        textBody = [textBody, sprintf( ...
-                            '  [%s] %s | IDN: %s | Resource: %s\n', ...
-                            connStr, nameStr, idnStr, resStr)]; %#ok<AGROW>
-                    end
-                end
-                textBody = [textBody, '--- End Snapshot ---']; %#ok<AGROW>
-            end
-
-            % Build form data
-            formData = struct();
-            formData.cmd = 'New';
-            formData.Author = opts.Author;
-            formData.Sample = opts.Sample;
-            formData.Measurement = opts.Measurement;
-            formData.Type = opts.Type;
-            formData.text = textBody;
-
-            attachment = strtrim(string(opts.Attachment));
-            hasAttachment = strlength(attachment) > 0 && isfile(attachment);
-
-            % Send HTTP POST
-            webOpts = weboptions( ...
-                'RequestMethod', 'post', ...
-                'Timeout', 30, ...
-                'CharacterEncoding', 'UTF-8');
-
-            if hasAttachment
-                webOpts.MediaType = 'multipart/form-data';
+            if contains(executable, '\') || contains(executable, '/') || contains(executable, ':')
+                commandParts = {labdevices.core.DataExporter.quoteElogArg(executable)};
             else
-                webOpts.MediaType = 'application/x-www-form-urlencoded';
+                commandParts = {executable};
+            end
+            commandParts{end + 1} = ['-h ', ...
+                labdevices.core.DataExporter.quoteElogArg(strtrim(opts.Server))];
+            commandParts{end + 1} = ['-p ', ...
+                labdevices.core.DataExporter.quoteElogArg(num2str(round(opts.Port)))];
+            commandParts{end + 1} = ['-l ', ...
+                labdevices.core.DataExporter.quoteElogArg(strtrim(opts.Logbook))];
+
+            attributePairs = {
+                'Author', opts.Author;
+                'Sample', opts.Sample;
+                'Measurement', opts.Measurement;
+                'Type', opts.Type
+                };
+
+            extraFields = fieldnames(opts.AdditionalAttributes);
+            for idx = 1:numel(extraFields)
+                attributePairs(end + 1, :) = { ...
+                    extraFields{idx}, opts.AdditionalAttributes.(extraFields{idx})}; %#ok<AGROW>
             end
 
-            try
-                if hasAttachment
-                    response = webwrite(url, formData, webOpts, ...
-                        'attachment', fileread(attachment));
-                else
-                    response = webwrite(url, formData, webOpts);
+            for idx = 1:size(attributePairs, 1)
+                attrName = strtrim(char(string(attributePairs{idx, 1})));
+                attrValue = strtrim(char(string(attributePairs{idx, 2})));
+                if isempty(attrName) || isempty(attrValue)
+                    continue;
                 end
-                success = true;
-            catch ME
-                success = false;
-                response = ME.message;
+                commandParts{end + 1} = ['-a ', ...
+                    labdevices.core.DataExporter.quoteElogArg( ...
+                    sprintf('%s=%s', attrName, attrValue))]; %#ok<AGROW>
             end
+
+            for idx = 1:numel(attachments)
+                commandParts{end + 1} = ['-f ', ...
+                    labdevices.core.DataExporter.quoteElogArg(attachments{idx})]; %#ok<AGROW>
+            end
+
+            commandParts{end + 1} = labdevices.core.DataExporter.quoteElogArg(textBody);
+            command = strjoin(commandParts, ' ');
+
+            [status, response] = system(command);
+            response = char(string(response));
+            responseLower = lower(strtrim(response));
+            success = status == 0 && (isempty(responseLower) || ...
+                contains(responseLower, 'successful') || ...
+                contains(responseLower, 'id='));
+        end
+
+        function text = escapeElogText(text)
+            text = char(string(text));
+            text = strrep(text, '"', '''');
+            text = regexprep(text, '\r\n|\r|\n', '\\n');
+        end
+
+        function body = composeElogBody(comments, snapshot)
+            sections = {};
+            commentText = strtrim(char(string(comments)));
+            if ~isempty(commentText)
+                sections{end + 1} = labdevices.core.DataExporter.escapeElogText(commentText); %#ok<AGROW>
+            end
+
+            snapshotText = labdevices.core.DataExporter.formatElogSnapshot(snapshot);
+            if ~isempty(snapshotText)
+                sections{end + 1} = snapshotText; %#ok<AGROW>
+            end
+
+            if isempty(sections)
+                body = ' ';
+            else
+                body = strjoin(sections, sprintf('\\n\\n'));
+            end
+        end
+
+        function text = formatElogSnapshot(snapshot)
+            if isempty(snapshot) || ~isstruct(snapshot) || isempty(fieldnames(snapshot))
+                text = '';
+                return;
+            end
+
+            lines = {'--- Instrument Snapshot ---'};
+            if isfield(snapshot, 'timestamp') && ~isempty(snapshot.timestamp)
+                lines{end + 1} = ['Timestamp: ', char(string(snapshot.timestamp))]; %#ok<AGROW>
+            end
+
+            if isfield(snapshot, 'instruments') && ~isempty(snapshot.instruments)
+                for idx = 1:numel(snapshot.instruments)
+                    inst = snapshot.instruments(idx);
+                    connStr = 'No';
+                    if isfield(inst, 'connected') && inst.connected
+                        connStr = 'Yes';
+                    end
+
+                    keyStr = '';
+                    nameStr = '';
+                    idnStr = 'N/A';
+                    resStr = '';
+                    if isfield(inst, 'key'); keyStr = char(string(inst.key)); end
+                    if isfield(inst, 'name'); nameStr = char(string(inst.name)); end
+                    if isfield(inst, 'idn'); idnStr = char(string(inst.idn)); end
+                    if isfield(inst, 'resourceName')
+                        resStr = char(string(inst.resourceName));
+                    end
+
+                    lines{end + 1} = sprintf('[%s] %s | %s | IDN: %s | Resource: %s', ...
+                        connStr, keyStr, nameStr, idnStr, resStr); %#ok<AGROW>
+                end
+            end
+
+            lines{end + 1} = '--- End Snapshot ---';
+            escaped = cellfun(@labdevices.core.DataExporter.escapeElogText, ...
+                lines, 'UniformOutput', false);
+            text = strjoin(escaped, sprintf('\\n'));
+        end
+
+        function attachments = normalizeElogAttachments(primary, secondary)
+            attachments = {};
+            rawItems = {};
+
+            if nargin >= 1 && ~isempty(primary)
+                rawItems = [rawItems, labdevices.core.DataExporter.toCellstr(primary)]; %#ok<AGROW>
+            end
+            if nargin >= 2 && ~isempty(secondary)
+                rawItems = [rawItems, labdevices.core.DataExporter.toCellstr(secondary)]; %#ok<AGROW>
+            end
+
+            for idx = 1:numel(rawItems)
+                filePath = char(string(rawItems{idx}));
+                if ~isempty(filePath) && isfile(filePath)
+                    attachments{end + 1} = filePath; %#ok<AGROW>
+                end
+            end
+
+            if ~isempty(attachments)
+                attachments = unique(attachments, 'stable');
+            end
+        end
+
+        function items = toCellstr(value)
+            if isempty(value)
+                items = {};
+            elseif iscell(value)
+                items = cellstr(string(value));
+            elseif isstring(value)
+                items = cellstr(value(:));
+            else
+                items = {char(string(value))};
+            end
+        end
+
+        function executable = resolveElogExecutable(preferred)
+            candidates = {};
+            preferred = strtrim(char(string(preferred)));
+            if ~isempty(preferred)
+                candidates{end + 1} = preferred; %#ok<AGROW>
+            end
+            candidates{end + 1} = 'E:\Program Files (x86)\ELOG\elog.exe'; %#ok<AGROW>
+            candidates{end + 1} = 'C:\Program Files (x86)\ELOG\elog.exe'; %#ok<AGROW>
+            candidates{end + 1} = 'C:\Program Files\ELOG\elog.exe'; %#ok<AGROW>
+
+            executable = 'elog';
+            for idx = 1:numel(candidates)
+                if isfile(candidates{idx})
+                    executable = candidates{idx};
+                    return;
+                end
+            end
+        end
+
+        function out = quoteElogArg(value)
+            value = char(string(value));
+            value = strrep(value, '"', '''');
+            out = ['"', value, '"'];
         end
     end
 end
