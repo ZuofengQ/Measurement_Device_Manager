@@ -99,6 +99,15 @@ classdef DataExporter
                             data, 'idn', 'N/A')));
                 end
 
+                % Attach the saved plot PNG (only PNG, no MAT/CSV)
+                if isfield(saved, 'png') && ~isempty(saved.png)
+                    if ~isfield(opts, 'Attachments') || isempty(opts.Attachments)
+                        opts.Attachments = {char(saved.png)};
+                    else
+                        opts.Attachments = [opts.Attachments, {char(saved.png)}];
+                    end
+                end
+
                 % Attempt upload (non-blocking via try/catch)
                 try
                     [uploadOk, uploadResp] = ...
@@ -230,6 +239,12 @@ classdef DataExporter
                 return;
             end
 
+            % Truncate all columns to the minimum common length
+            minLen = min(cellfun(@numel, columns));
+            for idx = 1:numel(columns)
+                columns{idx} = columns{idx}(1:minLen);
+            end
+
             T = table(columns{:}, 'VariableNames', names);
         end
 
@@ -338,21 +353,28 @@ classdef DataExporter
             %   success  - HTTP 2xx 则为 true
             %   response - 服务器响应体字符串
 
-            arguments
-                opts.Server      char = '192.168.1.72'
-                opts.Port        double = 8081
-                opts.Logbook     char = ''
-                opts.Author      char = ''
-                opts.Sample      char = ''
-                opts.Measurement char = ''
-                opts.Type        char = 'ManualSave'
-                opts.Comments    char = ''
-                opts.Snapshot    struct = struct()
-                opts.Attachment = {}
-                opts.Attachments = {}
-                opts.Executable char = ''
-                opts.AdditionalAttributes struct = struct()
-            end
+            if nargin < 1; opts = struct(); end
+            if ~isfield(opts, 'Server') || isempty(opts.Server); opts.Server = '192.168.1.72'; end
+            if ~isfield(opts, 'Port') || isempty(opts.Port); opts.Port = 8080; end
+            if ~isfield(opts, 'Logbook'); opts.Logbook = ''; end
+            if ~isfield(opts, 'Author'); opts.Author = ''; end
+            if ~isfield(opts, 'Sample'); opts.Sample = ''; end
+            if ~isfield(opts, 'Measurement'); opts.Measurement = ''; end
+            if ~isfield(opts, 'Type') || isempty(opts.Type); opts.Type = 'ManualSave'; end
+            if ~isfield(opts, 'Comments'); opts.Comments = ''; end
+            if ~isfield(opts, 'Snapshot'); opts.Snapshot = struct(); end
+            if ~isfield(opts, 'Attachment'); opts.Attachment = {}; end
+            if ~isfield(opts, 'Attachments'); opts.Attachments = {}; end
+            if ~isfield(opts, 'Executable'); opts.Executable = ''; end
+            if ~isfield(opts, 'AdditionalAttributes'); opts.AdditionalAttributes = struct(); end
+            opts.Server = char(string(opts.Server));
+            opts.Logbook = char(string(opts.Logbook));
+            opts.Author = char(string(opts.Author));
+            opts.Sample = char(string(opts.Sample));
+            opts.Measurement = char(string(opts.Measurement));
+            opts.Type = char(string(opts.Type));
+            opts.Comments = char(string(opts.Comments));
+            opts.Executable = char(string(opts.Executable));
 
             % Validate required fields
             if isempty(strtrim(opts.Logbook))
@@ -413,12 +435,16 @@ classdef DataExporter
             commandParts{end + 1} = labdevices.core.DataExporter.quoteElogArg(textBody);
             command = strjoin(commandParts, ' ');
 
-            [status, response] = system(command);
-            response = char(string(response));
+            [status, cmdout] = system(command);
+            response = char(string(cmdout));
             responseLower = lower(strtrim(response));
             success = status == 0 && (isempty(responseLower) || ...
                 contains(responseLower, 'successful') || ...
                 contains(responseLower, 'id='));
+
+            if ~success
+                response = sprintf('CMD: %s\nOUT: %s', command, response);
+            end
         end
 
         function text = escapeElogText(text)
@@ -442,7 +468,7 @@ classdef DataExporter
             if isempty(sections)
                 body = ' ';
             else
-                body = strjoin(sections, sprintf('\\n\\n'));
+                body = strjoin(sections, '\n\n');
             end
         end
 
@@ -484,7 +510,7 @@ classdef DataExporter
             lines{end + 1} = '--- End Snapshot ---';
             escaped = cellfun(@labdevices.core.DataExporter.escapeElogText, ...
                 lines, 'UniformOutput', false);
-            text = strjoin(escaped, sprintf('\\n'));
+            text = strjoin(escaped, '\n');
         end
 
         function attachments = normalizeElogAttachments(primary, secondary)
@@ -528,6 +554,7 @@ classdef DataExporter
             if ~isempty(preferred)
                 candidates{end + 1} = preferred; %#ok<AGROW>
             end
+            candidates{end + 1} = 'D:\Program Files (x86)\ELOG\elog.exe'; %#ok<AGROW>
             candidates{end + 1} = 'E:\Program Files (x86)\ELOG\elog.exe'; %#ok<AGROW>
             candidates{end + 1} = 'C:\Program Files (x86)\ELOG\elog.exe'; %#ok<AGROW>
             candidates{end + 1} = 'C:\Program Files\ELOG\elog.exe'; %#ok<AGROW>

@@ -83,9 +83,14 @@ classdef MeasurementManagerApp < handle
         SampleEdit          matlab.ui.control.EditField
         MeasurementEdit     matlab.ui.control.EditField
         CommentsArea        matlab.ui.control.TextArea
-        NoteEdit            matlab.ui.control.EditField
         AttachSnapshotCheck matlab.ui.control.CheckBox
         ElogStatusLabel     matlab.ui.control.Label
+        DesignDrop          matlab.ui.control.DropDown
+        WaferEdit           matlab.ui.control.EditField
+        FieldEdit           matlab.ui.control.EditField
+        ChipEdit            matlab.ui.control.EditField
+        TypeDrop            matlab.ui.control.DropDown
+        AutoElogCheck       matlab.ui.control.CheckBox
 
         % --- 状态栏 & 日志 ---
         StatusLabel         matlab.ui.control.Label
@@ -316,94 +321,130 @@ classdef MeasurementManagerApp < handle
                 'BackgroundColor', [0.0, 0.5, 0.2]);
             saveSelectedButton = uibutton(storageGrid, 'push', 'Text', 'Save Selected', 'FontSize', 13, ...
                 'ButtonPushedFcn', @(~,~) obj.onSaveSelected());
+            clearMemButton = uibutton(storageGrid, 'push', 'Text', 'Clear', 'FontSize', 13, ...
+                'ButtonPushedFcn', @(~,~) obj.onClearMemory(), ...
+                'BackgroundColor', [0.8, 0.2, 0.2]);
             saveAllButton.Layout.Row = 4;
             saveAllButton.Layout.Column = 1;
             saveSessionButton.Layout.Row = 4;
-            saveSessionButton.Layout.Column = 3;
+            saveSessionButton.Layout.Column = 2;
             saveSelectedButton.Layout.Row = 4;
-            saveSelectedButton.Layout.Column = 5;
+            saveSelectedButton.Layout.Column = 3;
+            clearMemButton.Layout.Row = 4;
+            clearMemButton.Layout.Column = 5;
         end
 
         function buildElogPanel(obj, parent)
-            panel = uipanel(parent, 'Title', 'ELOG Upload', 'FontSize', 14);
+            panel = uipanel(parent, 'Title', 'ELOG Upload', 'FontSize', 12);
             panel.Layout.Row = 2;
             panel.Layout.Column = 1;
 
-            elogGrid = uigridlayout(panel, [9, 3]);
-            elogGrid.RowHeight = {24, 24, 24, 24, 24, 62, 24, 32, 18};
-            elogGrid.ColumnWidth = {'fit', '1x', 'fit'};
-            elogGrid.Padding = [4, 4, 4, 4];
-            elogGrid.RowSpacing = 2;
-            elogGrid.ColumnSpacing = 4;
+            elogGrid = uigridlayout(panel, [10, 4]);
+            elogGrid.RowHeight = {18, 18, 18, 18, 18, 18, 18, 36, 22, 14};
+            elogGrid.ColumnWidth = {'fit', '1x', 'fit', '1x'};
+            elogGrid.Padding = [2, 2, 2, 2];
+            elogGrid.RowSpacing = 1;
+            elogGrid.ColumnSpacing = 2;
 
             % 1: Server : Port
-            uilabel(elogGrid, 'Text', 'Server:', 'FontSize', 13);
+            uilabel(elogGrid, 'Text', 'Server:', 'FontSize', 11);
             obj.ServerEdit = uieditfield(elogGrid, 'text', ...
-                'Value', obj.Config.ElogServer, 'FontSize', 13);
-            uilabel(elogGrid, 'Text', 'Port:', 'FontSize', 13);
+                'Value', obj.Config.ElogServer, 'FontSize', 11);
             obj.ServerEdit.Layout.Column = 2;
+            uilabel(elogGrid, 'Text', 'Port:', 'FontSize', 11);
             obj.PortEdit = uieditfield(elogGrid, 'numeric', ...
-                'Value', obj.Config.ElogPort, 'FontSize', 13, ...
+                'Value', obj.Config.ElogPort, 'FontSize', 11, ...
                 'Limits', [1, 65535], 'RoundFractionalValues', 'on');
-            obj.PortEdit.Layout.Column = 3;
+            obj.PortEdit.Layout.Column = 4;
 
             % 2: Logbook
-            uilabel(elogGrid, 'Text', 'Logbook:', 'FontSize', 13);
-            obj.LogbookDrop = uidropdown(elogGrid, 'FontSize', 13, ...
+            uilabel(elogGrid, 'Text', 'Logbook:', 'FontSize', 11);
+            obj.LogbookDrop = uidropdown(elogGrid, 'FontSize', 11, ...
                 'Items', cellstr(string(obj.Config.ElogLogbooks)), ...
                 'Value', obj.pickDropDownValue(obj.Config.ElogLogbooks, ...
                     obj.Config.ElogSelectedLogbook), ...
                 'Editable', 'on');
-            obj.LogbookDrop.Layout.Column = [2, 3];
+            obj.LogbookDrop.Layout.Column = [2, 4];
 
             % 3: Author
-            uilabel(elogGrid, 'Text', 'Author:', 'FontSize', 13);
-            obj.AuthorDrop = uidropdown(elogGrid, 'FontSize', 13, ...
+            uilabel(elogGrid, 'Text', 'Author:', 'FontSize', 11);
+            obj.AuthorDrop = uidropdown(elogGrid, 'FontSize', 11, ...
                 'Items', cellstr(string(obj.Config.ElogAuthors)), ...
                 'Value', obj.pickDropDownValue(obj.Config.ElogAuthors, ...
                     obj.Config.ElogSelectedAuthor), ...
                 'Editable', 'on');
-            obj.AuthorDrop.Layout.Column = [2, 3];
+            obj.AuthorDrop.Layout.Column = [2, 4];
 
-            % 4: Sample
-            uilabel(elogGrid, 'Text', 'Sample:', 'FontSize', 13);
-            obj.SampleEdit = uieditfield(elogGrid, 'text', 'FontSize', 13, 'Value', '');
-            obj.SampleEdit.Layout.Column = [2, 3];
+            % 4: XOI/Design : Type
+            uilabel(elogGrid, 'Text', 'XOI/Design:', 'FontSize', 11);
+            obj.DesignDrop = uidropdown(elogGrid, 'FontSize', 11, ...
+                'Items', cellstr(string(obj.Config.ElogDesign)), ...
+                'Value', obj.pickDropDownValue(obj.Config.ElogDesign, ...
+                    obj.Config.ElogSelectedDesign), ...
+                'Editable', 'off');
+            obj.DesignDrop.Layout.Column = 2;
+            uilabel(elogGrid, 'Text', 'Type:', 'FontSize', 11);
+            obj.TypeDrop = uidropdown(elogGrid, 'FontSize', 11, ...
+                'Items', cellstr(string(obj.Config.ElogType)), ...
+                'Value', obj.pickDropDownValue(obj.Config.ElogType, ...
+                    obj.Config.ElogSelectedType), ...
+                'Editable', 'off');
+            obj.TypeDrop.Layout.Column = 4;
 
-            % 5: Measurement
-            uilabel(elogGrid, 'Text', 'Measurement:', 'FontSize', 13);
-            obj.MeasurementEdit = uieditfield(elogGrid, 'text', 'FontSize', 13, 'Value', '');
-            obj.MeasurementEdit.Layout.Column = [2, 3];
+            % 5: Wafer : Chip
+            uilabel(elogGrid, 'Text', 'Wafer:', 'FontSize', 11);
+            obj.WaferEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+                'Value', obj.Config.ElogWafer);
+            obj.WaferEdit.Layout.Column = 2;
+            uilabel(elogGrid, 'Text', 'Chip:', 'FontSize', 11);
+            obj.ChipEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+                'Value', obj.Config.ElogChip);
+            obj.ChipEdit.Layout.Column = 4;
 
-            % 6: Comments
-            uilabel(elogGrid, 'Text', 'Comments:', 'FontSize', 13);
-            obj.CommentsArea = uitextarea(elogGrid, 'FontSize', 13, ...
-                'Value', '', 'Placeholder', 'Enter comments for the ELOG entry...');
-            obj.CommentsArea.Layout.Column = [2, 3];
+            % 6: Field : Sample
+            uilabel(elogGrid, 'Text', 'Field:', 'FontSize', 11);
+            obj.FieldEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+                'Value', obj.Config.ElogField);
+            obj.FieldEdit.Layout.Column = 2;
+            uilabel(elogGrid, 'Text', 'Sample:', 'FontSize', 11);
+            obj.SampleEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, ...
+                'Value', obj.Config.ElogSample);
+            obj.SampleEdit.Layout.Column = 4;
 
-            % 7: Note
-            uilabel(elogGrid, 'Text', 'Note:', 'FontSize', 13);
-            obj.NoteEdit = uieditfield(elogGrid, 'text', 'FontSize', 13, ...
-                'Value', '', 'Placeholder', 'Additional note / remarks');
-            obj.NoteEdit.Layout.Column = [2, 3];
+            % 7: Measurement
+            uilabel(elogGrid, 'Text', 'Meas.:', 'FontSize', 11);
+            obj.MeasurementEdit = uieditfield(elogGrid, 'text', 'FontSize', 11, 'Value', '');
+            obj.MeasurementEdit.Layout.Column = [2, 4];
 
-            % 8: Upload row
+            % 8: Comments (compact)
+            uilabel(elogGrid, 'Text', 'Comments:', 'FontSize', 11);
+            obj.CommentsArea = uitextarea(elogGrid, 'FontSize', 11, ...
+                'Value', '', 'Placeholder', 'ELOG comments / notes...');
+            obj.CommentsArea.Layout.Column = [2, 4];
+
+            % 9: Upload row
             obj.AttachSnapshotCheck = uicheckbox(elogGrid, ...
-                'Text', 'Attach app snapshot (.png)', 'FontSize', 13, 'Value', true);
-            obj.AttachSnapshotCheck.Layout.Column = [1, 2];
-            obj.AttachSnapshotCheck.Layout.Row = 8;
+                'Text', 'Attach snapshot (.png)', 'FontSize', 11, 'Value', true);
+            obj.AttachSnapshotCheck.Layout.Column = 1;
+            obj.AttachSnapshotCheck.Layout.Row = 9;
+
+            obj.AutoElogCheck = uicheckbox(elogGrid, ...
+                'Text', 'Auto-upload on save', 'FontSize', 11, ...
+                'Value', obj.Config.ElogAutoUpload);
+            obj.AutoElogCheck.Layout.Column = 2;
+            obj.AutoElogCheck.Layout.Row = 9;
 
             uploadButton = uibutton(elogGrid, 'push', ...
-                'Text', 'Upload to ELOG', 'FontSize', 13, ...
+                'Text', 'Upload', 'FontSize', 11, ...
                 'ButtonPushedFcn', @(~,~) obj.onUploadElog(), ...
                 'BackgroundColor', [0.1, 0.4, 0.8]);
-            uploadButton.Layout.Row = 8;
-            uploadButton.Layout.Column = 3;
+            uploadButton.Layout.Row = 9;
+            uploadButton.Layout.Column = [3, 4];
 
             obj.ElogStatusLabel = uilabel(elogGrid, ...
-                'Text', 'Idle', 'FontSize', 12, 'FontColor', [0.5, 0.5, 0.5]);
-            obj.ElogStatusLabel.Layout.Row = 9;
-            obj.ElogStatusLabel.Layout.Column = [1, 3];
+                'Text', 'Idle', 'FontSize', 10, 'FontColor', [0.5, 0.5, 0.5]);
+            obj.ElogStatusLabel.Layout.Row = 10;
+            obj.ElogStatusLabel.Layout.Column = [1, 4];
         end
 
         function populateInstrumentRows(obj)
@@ -784,6 +825,7 @@ classdef MeasurementManagerApp < handle
             if obj.AutoSaveCheck.Value
                 try; obj.doSave(data, key); catch ME;
                     obj.logMessage(sprintf("Auto-save failed: %s", ME.message), "error");
+                    obj.logMessage(sprintf("  stack: %s:%d", ME.stack(1).name, ME.stack(1).line), "error");
                 end
             end
         end
@@ -1017,31 +1059,28 @@ classdef MeasurementManagerApp < handle
                     obj.doSave(entry{2}, entry{1});
                 catch ME
                     obj.logMessage(sprintf("Save failed #%d: %s", i, ME.message), "error");
+                    obj.logMessage(sprintf("  at %s:%d", ME.stack(1).name, ME.stack(1).line), "error");
                 end
             end
             obj.logMessage(sprintf("Saved %d acquisitions.", numel(obj.AcquisitionStore)), "info");
         end
 
         function onSaveSession(obj, ~, ~)
-            % 将所有采集数据合并存入单个 .mat 文件
+            % 仅保存每台仪器最新一次采集的结果
             if isempty(obj.AcquisitionStore)
                 obj.logMessage("No data to save.", "warn"); return;
             end
 
             combined = struct();
-            for i = 1:numel(obj.AcquisitionStore)
+            seen = containers.Map();
+            % 从尾部向前遍历，每台仪器只取最新
+            for i = numel(obj.AcquisitionStore):-1:1
                 entry = obj.AcquisitionStore{i};
                 key = entry{1};
+                if seen.isKey(key); continue; end
+                seen(key) = true;
                 data = entry{2};
-
                 fieldName = matlab.lang.makeValidName(key);
-                if isfield(combined, fieldName)
-                    suffix = 2;
-                    while isfield(combined, [fieldName '_' num2str(suffix)])
-                        suffix = suffix + 1;
-                    end
-                    fieldName = [fieldName '_' num2str(suffix)];
-                end
                 combined.(fieldName) = data;
             end
 
@@ -1050,12 +1089,59 @@ classdef MeasurementManagerApp < handle
             if ~isfolder(obj.FolderEdit.Value); mkdir(obj.FolderEdit.Value); end
             save(matPath, "-struct", "combined", "-v7.3");
             obj.rememberSavedFiles({matPath});
-            obj.logMessage(sprintf("Session saved: %s (%d instruments)", ...
-                matPath, numel(fieldnames(combined))), "info");
+            obj.logMessage(sprintf("Session saved: %s (%d instruments, latest each)", ...
+                matPath, seen.Count), "info");
         end
 
         function onSaveSelected(obj, ~, ~)
-            obj.logMessage("Save Selected: click a row in the acquisition table.", "info");
+            if isempty(obj.AcquisitionStore)
+                obj.logMessage("No data to save.", "warn"); return;
+            end
+            % 获取 AcquisitionTable 当前选中行
+            sel = obj.getSelectedTableRows();
+            if isempty(sel)
+                obj.logMessage("No rows selected in acquisition table.", "warn"); return;
+            end
+            for r = 1:numel(sel)
+                row = sel(r);
+                if row > numel(obj.AcquisitionStore); continue; end
+                try
+                    entry = obj.AcquisitionStore{row};
+                    obj.doSave(entry{2}, entry{1});
+                catch ME
+                    obj.logMessage(sprintf("Save row #%d failed: %s", row, ME.message), "error");
+                end
+            end
+            obj.logMessage(sprintf("Saved %d selected acquisitions.", numel(sel)), "info");
+        end
+
+        function onClearMemory(obj, ~, ~)
+            n = numel(obj.AcquisitionStore);
+            if n == 0
+                obj.logMessage("Memory already empty.", "info"); return;
+            end
+            obj.AcquisitionStore = {};
+            obj.AcquisitionTable.Data = cell(0, 5);
+            % 清除所有绘图
+            axKeys = obj.PlotAxesMap.keys();
+            for i = 1:numel(axKeys)
+                ax = obj.PlotAxesMap(axKeys{i});
+                if isvalid(ax); cla(ax); end
+            end
+            remove(obj.PlotAxesMap, axKeys);
+            obj.LastSavedPaths = {};
+            obj.logMessage(sprintf("Cleared %d acquisitions from memory.", n), "info");
+            obj.updateStatusBar();
+        end
+
+        function rows = getSelectedTableRows(obj)
+            rows = [];
+            try
+                sel = obj.AcquisitionTable.Selection;
+                if isempty(sel); return; end
+                rows = unique(sel(:, 1))';
+            catch
+            end
         end
 
         function saved = doSave(obj, data, key)
@@ -1065,8 +1151,27 @@ classdef MeasurementManagerApp < handle
             if obj.PngCheck.Value; formats{end + 1} = 'png'; end %#ok<AGROW>
             if isempty(formats); obj.logMessage("No formats selected.", "warn"); saved = struct(); return; end
 
+            uploadToElog = false;
+            elogParams = struct();
+            if obj.AutoElogCheck.Value
+                uploadToElog = true;
+                elogParams.Server = char(string(obj.ServerEdit.Value));
+                elogParams.Port = obj.PortEdit.Value;
+                elogParams.Logbook = char(string(obj.LogbookDrop.Value));
+                elogParams.Author = char(string(obj.AuthorDrop.Value));
+                elogParams.Sample = obj.buildElogSampleIdentifier();
+                elogParams.Measurement = char(string(obj.MeasurementEdit.Value));
+                elogParams.Type = char(string(obj.TypeDrop.Value));
+                elogParams.Comments = obj.buildElogBodyText();
+                elogParams.AdditionalAttributes = struct( ...
+                    'XOI', char(string(obj.DesignDrop.Value)), ...
+                    'Measuretype', char(string(obj.TypeDrop.Value)));
+                elogParams.Executable = char(string(obj.Config.ElogExecutable));
+            end
+
             saved = labdevices.core.DataExporter.saveAcquisition(data, ...
-                'Folder', obj.resolveInstrumentSaveFolder(data), 'Formats', formats);
+                'Folder', obj.resolveInstrumentSaveFolder(data), 'Formats', formats, ...
+                'UploadToElog', uploadToElog, 'ElogParams', elogParams);
             obj.rememberSavedFiles(saved);
             if isfield(saved, 'mat')
                 obj.logMessage(sprintf("Saved: %s", saved.mat), "info");
@@ -1095,18 +1200,19 @@ classdef MeasurementManagerApp < handle
             opts.Port = obj.PortEdit.Value;
             opts.Logbook = logbook;
             opts.Author = author;
-            opts.Sample = char(string(obj.SampleEdit.Value));
+            opts.Sample = obj.buildElogSampleIdentifier();
             opts.Measurement = char(string(obj.MeasurementEdit.Value));
-            opts.Type = 'MeasurementManager';
+            opts.Type = char(string(obj.TypeDrop.Value));
             opts.Comments = obj.buildElogBodyText();
+            opts.AdditionalAttributes = struct( ...
+                'XOI', char(string(obj.DesignDrop.Value)), ...
+                'Measuretype', char(string(obj.TypeDrop.Value)));
 
-            % 追加 Note 到 Comments
             if obj.AttachSnapshotCheck.Value
                 opts.Snapshot = obj.Station.getSnapshot();
             end
 
-            [opts.Attachments, cleanupPaths] = obj.createElogAttachments();
-            cleanupObj = onCleanup(@() obj.cleanupTemporaryFiles(cleanupPaths)); %#ok<NASGU>
+            [opts.Attachments, ~] = obj.createElogAttachments();
 
             try
                 [success, response] = labdevices.core.DataExporter.uploadToElog(opts);
@@ -1204,12 +1310,21 @@ classdef MeasurementManagerApp < handle
             config = struct();
             config.Folder = fullfile(fileparts(mfilename('fullpath')), 'output');
             config.ElogServer = '192.168.1.72';
-            config.ElogPort = 8081;
-            config.ElogLogbooks = {'LabLog', 'MeasurementLog'};
-            config.ElogAuthors = {'User', 'Operator'};
-            config.ElogSelectedLogbook = '';
-            config.ElogSelectedAuthor = '';
-            config.ElogExecutable = 'E:\Program Files (x86)\ELOG\elog.exe';
+            config.ElogPort = 8080;
+            config.ElogLogbooks = {'EPIC', 'LabLog', 'MeasurementLog'};
+            config.ElogAuthors = {'Li_Yansong', 'Yang_Nianjia', 'Wu_Xinyi', 'Other'};
+            config.ElogSelectedLogbook = 'EPIC';
+            config.ElogSelectedAuthor = 'Li_Yansong';
+            config.ElogExecutable = 'D:\Program Files (x86)\ELOG\elog.exe';
+            config.ElogDesign = {'SiN', 'LNOI'};
+            config.ElogSelectedDesign = '';
+            config.ElogWafer = '';
+            config.ElogField = '';
+            config.ElogChip = '';
+            config.ElogType = {'MRR', 'OFDR', 'PHASE'};
+            config.ElogSelectedType = '';
+            config.ElogSample = '';
+            config.ElogAutoUpload = false;
 
             if isfile(configPath)
                 try
@@ -1242,6 +1357,15 @@ classdef MeasurementManagerApp < handle
             appConfig.ElogSelectedLogbook = char(string(obj.LogbookDrop.Value));
             appConfig.ElogSelectedAuthor = char(string(obj.AuthorDrop.Value));
             appConfig.ElogExecutable = obj.Config.ElogExecutable;
+            appConfig.ElogDesign = cellstr(string(obj.DesignDrop.Items));
+            appConfig.ElogSelectedDesign = char(string(obj.DesignDrop.Value));
+            appConfig.ElogWafer = char(string(obj.WaferEdit.Value));
+            appConfig.ElogField = char(string(obj.FieldEdit.Value));
+            appConfig.ElogChip = char(string(obj.ChipEdit.Value));
+            appConfig.ElogType = cellstr(string(obj.TypeDrop.Items));
+            appConfig.ElogSelectedType = char(string(obj.TypeDrop.Value));
+            appConfig.ElogSample = char(string(obj.SampleEdit.Value));
+            appConfig.ElogAutoUpload = obj.AutoElogCheck.Value;
             folder = fileparts(obj.ConfigPath);
             if ~isempty(folder) && ~isfolder(folder); mkdir(folder); end
             save(obj.ConfigPath, 'appConfig');
@@ -1262,15 +1386,14 @@ classdef MeasurementManagerApp < handle
         function body = buildElogBodyText(obj)
             sections = {};
 
+            sampleId = obj.buildElogSampleIdentifier();
+            if ~isempty(sampleId)
+                sections{end + 1} = labdevices.core.DataExporter.escapeElogText(sampleId); %#ok<AGROW>
+            end
+
             commentText = obj.textValueToBlock(obj.CommentsArea.Value);
             if ~isempty(commentText)
                 sections{end + 1} = sprintf('Comments:\\n%s', commentText); %#ok<AGROW>
-            end
-
-            noteText = strtrim(char(string(obj.NoteEdit.Value)));
-            if ~isempty(noteText)
-                sections{end + 1} = sprintf('Note:\\n%s', ...
-                    labdevices.core.DataExporter.escapeElogText(noteText)); %#ok<AGROW>
             end
 
             savedSummary = obj.buildSavedFilesSummary();
@@ -1281,8 +1404,30 @@ classdef MeasurementManagerApp < handle
             if isempty(sections)
                 body = ' ';
             else
-                body = strjoin(sections, sprintf('\\n\\n'));
+                body = strjoin(sections, '\n\n');
             end
+        end
+
+        function sampleId = buildElogSampleIdentifier(obj)
+            design = strtrim(char(string(obj.DesignDrop.Value)));
+            wafer = strtrim(char(string(obj.WaferEdit.Value)));
+            field = strtrim(char(string(obj.FieldEdit.Value)));
+            chip = strtrim(char(string(obj.ChipEdit.Value)));
+            sample = strtrim(char(string(obj.SampleEdit.Value)));
+
+            if isempty(wafer) && isempty(field) && isempty(chip) && isempty(sample)
+                sampleId = '';
+                return;
+            end
+
+            if ~isempty(design) && ~isempty(wafer) && contains(wafer, design, 'IgnoreCase', true)
+                sampleId = sprintf('%s_%s_%s_%s_%s', design, wafer, field, chip, sample);
+            else
+                sampleId = sprintf('%s_%s_%s_%s', wafer, field, chip, sample);
+            end
+
+            sampleId = regexprep(sampleId, '_+$', '');
+            sampleId = regexprep(sampleId, '^_+', '');
         end
 
         function text = textValueToBlock(~, value)
@@ -1307,7 +1452,7 @@ classdef MeasurementManagerApp < handle
 
             escaped = arrayfun(@(s) string(labdevices.core.DataExporter.escapeElogText(char(s))), ...
                 lines, 'UniformOutput', true);
-            text = strjoin(cellstr(escaped), sprintf('\\n'));
+            text = strjoin(cellstr(escaped), '\n');
         end
 
         function summary = buildSavedFilesSummary(obj)
@@ -1329,7 +1474,7 @@ classdef MeasurementManagerApp < handle
                 lines{i + 1} = sprintf('- %s', ...
                     labdevices.core.DataExporter.escapeElogText(existing{i}));
             end
-            summary = strjoin(lines, sprintf('\\n'));
+            summary = strjoin(lines, '\n');
         end
 
         function rememberSavedFiles(obj, saved)
@@ -1345,9 +1490,11 @@ classdef MeasurementManagerApp < handle
                 if isfield(saved, 'csv') && ~isempty(saved.csv)
                     csvPaths = saved.csv;
                     if ischar(csvPaths) || isstring(csvPaths)
-                        paths = [paths, cellstr(string(csvPaths))']; %#ok<AGROW>
+                        paths{end + 1} = char(string(csvPaths)); %#ok<AGROW>
                     elseif iscell(csvPaths)
-                        paths = [paths, cellstr(string(csvPaths))']; %#ok<AGROW>
+                        for c = 1:numel(csvPaths)
+                            paths{end + 1} = char(string(csvPaths{c})); %#ok<AGROW>
+                        end
                     end
                 end
             elseif iscell(saved)
@@ -1375,21 +1522,20 @@ classdef MeasurementManagerApp < handle
                 return;
             end
 
-            snapshotPath = fullfile(tempdir, sprintf('measurement_manager_elog_%s.png', ...
+            % Save to output folder (follow FitResGui pattern)
+            outFolder = char(string(obj.FolderEdit.Value));
+            if ~isfolder(outFolder); mkdir(outFolder); end
+            snapshotPath = fullfile(outFolder, sprintf('elog_snapshot_%s.png', ...
                 char(datetime("now", "Format", "yyyyMMdd_HHmmss_SSS"))));
             try
-                try
-                    exportapp(obj.Figure, snapshotPath);
-                catch
-                    exportgraphics(obj.Figure, snapshotPath, 'Resolution', 150);
-                end
-            catch
+                exportgraphics(obj.Figure, snapshotPath, 'Resolution', 150);
+            catch ME
+                obj.logMessage(sprintf("Snapshot export failed: %s", ME.message), "warn");
                 return;
             end
 
             if isfile(snapshotPath)
                 attachments{end + 1} = snapshotPath; %#ok<AGROW>
-                cleanupPaths{end + 1} = snapshotPath; %#ok<AGROW>
             end
         end
 
@@ -1438,6 +1584,14 @@ classdef MeasurementManagerApp < handle
             fprintf(fid, 'Sample: %s\n', opts.Sample);
             fprintf(fid, 'Measurement: %s\n', opts.Measurement);
             fprintf(fid, 'Type: %s\n', opts.Type);
+            if isfield(opts, 'AdditionalAttributes') && isstruct(opts.AdditionalAttributes)
+                if isfield(opts.AdditionalAttributes, 'XOI')
+                    fprintf(fid, 'XOI: %s\n', opts.AdditionalAttributes.XOI);
+                end
+                if isfield(opts.AdditionalAttributes, 'Measuretype')
+                    fprintf(fid, 'Measuretype: %s\n', opts.AdditionalAttributes.Measuretype);
+                end
+            end
             fprintf(fid, 'Result: %s\n', strtrim(char(string(response))));
         end
 
