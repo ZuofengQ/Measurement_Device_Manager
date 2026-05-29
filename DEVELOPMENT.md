@@ -29,7 +29,7 @@ Measurement Device Manager 是一套 MATLAB 仪器控制与数据采集系统，
 
 ```
 matlab_unified/
-├── MeasurementManagerApp.m          # 主 App 类（程序化 App Designer，~1130 行）
+├── MeasurementManagerApp.m          # 主 App 类（程序化 App Designer，~1850 行）
 ├── DEVELOPMENT.md                   # 本文档
 ├── README.md                        # 用户文档
 ├── app_config.mat                   # 持久化配置（文件夹、ELOG 设置）
@@ -64,32 +64,41 @@ matlab_unified/
 ## UI 布局架构
 
 ```
-Figure "Measurement Device Manager" (1400×850)
+Figure "Measurement Device Manager" (居中，85% 屏幕)
 │
-├── MainGrid [3×2]
-│   RowHeight: {'1.8x', '1.2x', 20}     ← Row 3 固定 20px 给状态栏
-│   ColumnWidth: {'2x', '3x'}
+├── MainGrid [3×3]
+│   RowHeight: {'1x', '1x', 30}         ← Row 3 固定 30px 给状态栏
+│   ColumnWidth: {'1.1x', '1.5x', '0.4x'}  ← 左 37% / 中 50% / 右 13%
 │
-│   ├── (1,1): TabGroup
-│   │   ├── Instruments Tab: [表格 + Lamp 列] + [Connect All | Disconnect All | Acquire All]
-│   │   └── Parameters Tab: 动态参数控件 + [Apply | Acquire | Apply+Acquire | Reset]
+│   ├── (1,1): leftWrapper [2×1]        ← 仪器 + 参数上下分栏，无 TabGroup
+│   │   ├── Instruments Panel (55%): [表格 + Lamp] + [Connect All | Disconnect All | Acquire All]
+│   │   └── Parameters Panel (45%): 动态参数控件 + [Apply | Acquire | Apply+Acquire | Reset]
 │   │
 │   ├── (1,2): "Live Data View" Panel
-│   │   ├── tiledlayout('flow')          ← 多仪器动态子图
+│   │   ├── LayoutDropdown + tiledlayout('flow')  ← 多仪器动态子图，布局可切换
 │   │   └── AcquisitionTable (Device/Type/Timestamp/Traces/Status)
 │   │
-│   ├── (2,1): Storage Panel + ELOG Panel (含 Note 字段)
-│   ├── (2,2): Status Log (uitextarea)
+│   ├── (1,3): Data Table + ELOG Panel (Collapsible)
 │   │
-│   └── (3,1:2): StatusLabel            ← 固定在 Grid 底部，不会漂移
+│   ├── (2,1): Storage Panel + [Save All | Save Session | Save Selected | Clear]
+│   ├── (2,2): Status Log (uitextarea)
+│   ├── (2,3): ELOG Content (collapsible with toggle button)
+│   │
+│   └── (3,1:3): StatusLabel            ← 固定在 Grid 底部，不会漂移
 ```
 
 ### 设计要点
 
-- **状态栏固定**：StatusLabel 位于 MainGrid 第 3 行（固定 20px），不再用绝对定位，窗口缩放时不会漂移
-- **Lamp 状态指示灯**：仪器表格右侧 uilamp 列，绿色=已连接，灰色=未连接。首行留空补偿表头高度
+- **无 TabGroup**：仪器列表和参数面板上下排列在同一面板内，一键切换仪器时参数面板即时显示（通过 show/hide 缓存而非重建）
+- **ParamControlCache**：每种仪器类型的参数控件仅创建一次，切换时通过 `Visible` 属性 show/hide，避免反复 delete+rebuild 的闪烁和性能开销
+- **设计令牌系统**：所有颜色/字体/间距通过 `COLOR_*`、`FONT_*`、`SPACE_*` 常量集中管理，共 30 个令牌，替换了全文件约 250 处硬编码值
+- **键盘快捷键**：Ctrl+Enter(采集) / Ctrl+S(全部保存) / Ctrl+D(Session保存) / Ctrl+C(连接所有) / Ctrl+L(清空) / Ctrl+E(ELOG上传)
+- **可折叠 ELOG 面板**：通过 `ElogToggleButton` 切换显隐，默认折叠节省空间，`ElogContentGrid` 承载全部字段
+- **HTML 按钮**：仪器表格内 Connect/Acquire 按钮用 HTML `<a>` 标签渲染在 uitable 单元格中，可随表同步滚动
+- **Lamp 状态指示灯**：仪器表格右侧 uilamp 列，绿色=已连接，灰色=未连接，黄色=采集中。首行留空补偿表头高度
 - **tiledlayout 多子图**：每个仪器 key 映射一个 tile，数据自动更新到对应 tile。用 `uipanel` 包裹 `tiledlayout` 保证兼容性
 - **安全回退**：`visadev` 不可用时给出清晰提示而非崩溃
+- **动态窗口**：Figure 尺寸取屏幕 85%，居中显示，适配不同分辨率
 
 ## 核心概念
 
@@ -235,7 +244,56 @@ Station.acquireAll() 对 map 中没有条目的 key 调用 `defaultAcquireArgs(t
 7. **分区注释** — 类文件用 `%%` 代码块分隔不同功能区
 8. **防御性类型转换** — `uidropdown` Items 必须是 string 数组或 char cell；从 ParameterDef.Choices 读取时做 `string()` 转换
 9. **Grid Layout 显式定位** — 所有 uigridlayout 子组件必须设置 `Layout.Row`/`Layout.Column`
-10. **字体大小规范** — 表格/按钮/标签/控件 14pt，坐标轴/日志 12pt，状态栏 11pt
+10. **字体大小规范** — 使用设计令牌 `FONT_*` 常量：面板标题 18pt，Section 标题 16pt，正文/按钮/表格 14pt，辅助文本 13pt，日志/状态栏/ELOG 12pt
+
+## 设计令牌参考
+
+所有 UI 元素必须使用以下常量，禁止硬编码颜色/字体/间距值。
+
+### 色彩
+
+| 令牌 | 值 | 用途 |
+|------|-----|------|
+| `COLOR_PRIMARY` | `[0.145 0.388 0.922]` | 主按钮 / 选中状态 |
+| `COLOR_PRIMARY_LIGHT` | `[0.859 0.918 0.996]` | 选中行背景 |
+| `COLOR_ACCENT` | `[0.008 0.518 0.780]` | 信息 / 次要强调 |
+| `COLOR_SUCCESS` | `[0.086 0.639 0.290]` | 成功 / 采集 / 保存 |
+| `COLOR_WARNING` | `[0.918 0.345 0.047]` | 警告 / 忙状态 |
+| `COLOR_DANGER` | `[0.863 0.149 0.149]` | 删除 / 断开 / 清除 |
+| `COLOR_BG` | `[0.973 0.980 0.988]` | Figure 全局背景 |
+| `COLOR_SURFACE` | `[1.000 1.000 1.000]` | 面板 / 卡片背景 |
+| `COLOR_SURFACE_ALT` | `[0.945 0.953 0.976]` | 表格交替行 |
+| `COLOR_TEXT` | `[0.059 0.090 0.165]` | 正文 / 标签 |
+| `COLOR_TEXT_SECONDARY` | `[0.278 0.333 0.412]` | 辅助文字 |
+| `COLOR_TEXT_MUTED` | `[0.580 0.639 0.722]` | 占位符 / 禁用 |
+| `COLOR_BORDER` | `[0.886 0.910 0.941]` | 面板边框 |
+| `COLOR_BORDER_LIGHT` | `[0.945 0.953 0.976]` | 极淡分隔线 |
+| `COLOR_LAMP_OFF` | `[0.796 0.835 0.882]` | 未连接灯 |
+| `COLOR_LAMP_ON` | `[0.133 0.773 0.369]` | 已连接灯 |
+| `COLOR_LAMP_BUSY` | `[0.961 0.620 0.043]` | 采集中灯 |
+| `COLOR_BUTTON_BG` | `[0.940 0.940 0.940]` | 默认按钮背景 |
+| `COLOR_TEAL` | `[0.000 0.650 0.650]` | Apply 按钮 |
+| `COLOR_LOG_BG` | `[0.970 0.970 0.970]` | 日志区背景 |
+
+### 排版
+
+| 令牌 | 大小 | 用途 |
+|------|------|------|
+| `FONT_XL` | 18pt | 面板标题（与正文明显区分） |
+| `FONT_LG` | 16pt | Section 标题 |
+| `FONT_MD` | 14pt | 正文 / 按钮 / 表格 |
+| `FONT_SM` | 13pt | 辅助文本 / 下拉框 |
+| `FONT_XS` | 12pt | 日志 / 状态栏 / ELOG 字段 |
+
+### 间距
+
+| 令牌 | 值 | 用途 |
+|------|-----|------|
+| `SPACE_XS` | 2px | 紧密元素间距 |
+| `SPACE_SM` | 4px | 默认内边距 |
+| `SPACE_MD` | 8px | 面板内边距 / 按钮间距 |
+| `SPACE_LG` | 12px | Section 间距 |
+| `SPACE_XL` | 16px | 大间距 |
 
 ## 如何扩展
 
