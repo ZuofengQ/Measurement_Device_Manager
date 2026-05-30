@@ -993,7 +993,9 @@ classdef MeasurementManagerApp < handle
             if isa(ctrl, 'matlab.ui.control.CheckBox')
                 val = ctrl.Value;
             elseif isa(ctrl, 'matlab.ui.control.DropDown')
-                val = char(string(ctrl.Value));
+                itemStr = string(ctrl.Value);
+                val = str2double(itemStr);
+                if isnan(val); val = char(itemStr); end
             elseif isa(ctrl, 'matlab.ui.control.NumericEditField')
                 val = ctrl.Value;
             elseif isa(ctrl, 'matlab.ui.control.EditField')
@@ -1199,7 +1201,9 @@ classdef MeasurementManagerApp < handle
             val = [];
             for i = 1:2:numel(argsCell)
                 if strcmp(argsCell{i}, name)
-                    val = argsCell{i+1}; return;
+                    val = argsCell{i+1};
+                    if isnumeric(val); val = num2str(val); end
+                    return;
                 end
             end
         end
