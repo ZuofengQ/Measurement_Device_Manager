@@ -20,7 +20,7 @@ classdef MeasurementManagerApp < handle
 
             obj.createComponents();
             obj.populateInstrumentRows();
-            obj.updateStatusLamps();
+            obj.updateStatusColumn();
             obj.updateStatusBar();
             obj.logMessage("App initialized. Ready.", "info");
         end
@@ -45,9 +45,8 @@ classdef MeasurementManagerApp < handle
 
         % --- 仪器表格 ---
         InstrumentKeys      string
-        StatusLamps         matlab.ui.control.Lamp
         InstrumentTable     matlab.ui.control.Table
-        LampGrid            matlab.ui.container.GridLayout
+        ConnectionFailed    logical = []
 
         % --- 参数面板 ---
         ParamGrid           matlab.ui.container.GridLayout
@@ -194,28 +193,18 @@ classdef MeasurementManagerApp < handle
             instrumentGrid.BackgroundColor = obj.COLOR_SURFACE;
 
             % 表格 + Lamp 并排（Connect/Acquire 用 HTML 按钮在表格内，可随表滚动）
-            instrTopGrid = uigridlayout(instrumentGrid, [1, 2]);
+            instrTopGrid = uigridlayout(instrumentGrid, [1, 1]);
             instrTopGrid.Layout.Row = 1;
-            instrTopGrid.ColumnWidth = {'1x', 72};
             instrTopGrid.Padding = [0, 0, 0, 0];
-            instrTopGrid.ColumnSpacing = obj.SPACE_XS;
 
             obj.InstrumentTable = uitable(instrTopGrid);
             obj.InstrumentTable.Layout.Column = 1;
-            obj.InstrumentTable.ColumnName = {'Instrument', 'Type', 'IP', 'Connect', 'Acquire'};
-            obj.InstrumentTable.ColumnWidth = {180, 55, 120, 85, 85};
-            obj.InstrumentTable.ColumnEditable = false(1, 5);
+            obj.InstrumentTable.ColumnName = {'Instrument', 'Type', 'IP', 'Status', 'Connect', 'Acquire'};
+            obj.InstrumentTable.ColumnWidth = {170, 55, 115, 70, 72, 72};
+            obj.InstrumentTable.ColumnEditable = false(1, 6);
             obj.InstrumentTable.FontSize = obj.FONT_MD;
             obj.InstrumentTable.BackgroundColor = obj.COLOR_SURFACE;
             obj.InstrumentTable.CellSelectionCallback = @(~,evt) obj.onInstrumentSelected(evt);
-
-            % Lamp 列
-            obj.LampGrid = uigridlayout(instrTopGrid, [1, 1]);
-            obj.LampGrid.Layout.Column = 2;
-            obj.LampGrid.Padding = [0, obj.SPACE_XS, 0, obj.SPACE_XS];
-            obj.LampGrid.RowSpacing = 0;
-            obj.LampGrid.BackgroundColor = obj.COLOR_SURFACE;
-            obj.LampGrid.Tag = 'LampColumnGrid';
 
             % 批量操作按钮
             buttonGrid = uigridlayout(instrumentGrid, [1, 3]);
@@ -603,36 +592,23 @@ classdef MeasurementManagerApp < handle
             allKeys = string(fieldnames(registry));
             obj.InstrumentKeys = allKeys;
             nInstruments = numel(allKeys);
+            obj.ConnectionFailed = false(nInstruments, 1);
 
-            % 表格数据（5列: Instrument, Type, IP, Connect, Acquire）
-            tableData = cell(nInstruments, 5);
+            % 表格数据（6列: Instrument, Type, IP, Status, Connect, Acquire）
+            gray = obj.colorToHex(obj.COLOR_LAMP_OFF);
+            tableData = cell(nInstruments, 6);
             for i = 1:nInstruments
                 k = allKeys(i);
                 entry = registry.(k);
                 tableData{i, 1} = char(entry.displayName);
                 tableData{i, 2} = char(entry.type);
                 tableData{i, 3} = char(entry.ip);
-                tableData{i, 4} = 'Connect';
-                tableData{i, 5} = 'Acquire';
+                tableData{i, 4} = sprintf('<html><div style="background:%s;color:#475569;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">未连接</div></html>', gray);
+                tableData{i, 5} = 'Connect';
+                tableData{i, 6} = 'Acquire';
             end
             obj.InstrumentTable.Data = tableData;
             obj.InstrumentTable.UserData = allKeys;
-
-            % 创建 Lamp 控件
-            lampCol = obj.LampGrid;
-            if ~isempty(lampCol) && isvalid(lampCol)
-                delete(lampCol.Children);
-                lampCol.RowHeight = [{'fit'}, repmat({'1x'}, 1, nInstruments)];
-                lampCol.ColumnWidth = {'1x'};
-                lampCol.Padding = [0, 6, 0, 6];
-                obj.StatusLamps = matlab.ui.control.Lamp.empty();
-                for i = 1:nInstruments
-                    obj.StatusLamps(i) = uilamp(lampCol, ...
-                        'Color', obj.COLOR_LAMP_OFF);
-                    obj.StatusLamps(i).Layout.Row = i + 1;
-                    obj.StatusLamps(i).Layout.Column = 1;
-                end
-            end
         end
 
         function refreshParameterPanel(obj, key)
@@ -773,45 +749,57 @@ classdef MeasurementManagerApp < handle
     methods (Access = private)
         function onConnect(obj, key)
             if obj.IsBusy; obj.logMessage("System busy.", "warn"); return; end
+            idx = find(obj.InstrumentKeys == key, 1);
             try
                 obj.Station.connect(key);
+                obj.ConnectionFailed(idx) = false;
                 obj.logMessage(sprintf("Connected: %s", key), "info");
             catch ME
+                obj.ConnectionFailed(idx) = true;
                 obj.logMessage(sprintf("Connect failed (%s): %s", key, ME.message), "error");
             end
-            obj.updateStatusLamps();
+            obj.updateStatusColumn();
             obj.updateStatusBar();
         end
 
         function onDisconnect(obj, key)
+            idx = find(obj.InstrumentKeys == key, 1);
             try
                 obj.Station.disconnect(key);
+                obj.ConnectionFailed(idx) = false;
                 obj.logMessage(sprintf("Disconnected: %s", key), "info");
             catch ME
                 obj.logMessage(sprintf("Disconnect failed (%s): %s", key, ME.message), "error");
             end
-            obj.updateStatusLamps();
+            obj.updateStatusColumn();
             obj.updateStatusBar();
         end
 
         function onConnectAll(obj, ~, ~)
             if obj.IsBusy; obj.logMessage("System busy.", "warn"); return; end
             obj.setBusy(true);
-            try
-                obj.Station.connectAll();
-                obj.logMessage("All instruments connected.", "info");
-            catch ME
-                obj.logMessage(sprintf("ConnectAll error: %s", ME.message), "error");
+            for i = 1:numel(obj.InstrumentKeys)
+                key = obj.InstrumentKeys(i);
+                try
+                    obj.Station.connect(key);
+                    obj.ConnectionFailed(i) = false;
+                catch ME
+                    obj.ConnectionFailed(i) = true;
+                    obj.logMessage(sprintf("Connect failed (%s): %s", key, ME.message), "error");
+                end
             end
+            nOk = sum(~obj.ConnectionFailed);
+            obj.logMessage(sprintf("Connected: %d/%d instruments.", nOk, numel(obj.InstrumentKeys)), "info");
             obj.setBusy(false);
-            obj.updateStatusLamps();
+            obj.updateStatusColumn();
             obj.updateStatusBar();
         end
 
         function onDisconnectAll(obj, ~, ~)
             obj.Station.disconnectAll();
+            obj.ConnectionFailed(:) = false;
             obj.logMessage("All instruments disconnected.", "info");
-            obj.updateStatusLamps();
+            obj.updateStatusColumn();
             obj.updateStatusBar();
         end
 
@@ -821,9 +809,10 @@ classdef MeasurementManagerApp < handle
             row = indices(1); col = indices(2);
             key = obj.InstrumentKeys(row);
 
-            % 5列: 1=Instrument,2=Type,3=IP,4=Connect,5=Acquire
-            if col == 4; obj.onConnect(key); return;
-            elseif col == 5; obj.onAcquire(key); return;
+            % 6列: 1=Instrument,2=Type,3=IP,4=Status,5=Connect,6=Acquire
+            if col == 5; obj.onConnect(key); return;
+            elseif col == 6; obj.onAcquire(key); return;
+            elseif col == 4; return;
             end
 
             obj.SelectedKey = key;
@@ -1470,16 +1459,27 @@ classdef MeasurementManagerApp < handle
             drawnow;
         end
 
-        function updateStatusLamps(obj)
+        function updateStatusColumn(obj)
+            data = obj.InstrumentTable.Data;
+            green = obj.colorToHex(obj.COLOR_LAMP_ON);
+            red = obj.colorToHex(obj.COLOR_DANGER);
+            gray = obj.colorToHex(obj.COLOR_LAMP_OFF);
             for i = 1:numel(obj.InstrumentKeys)
-                if i <= numel(obj.StatusLamps) && isvalid(obj.StatusLamps(i))
+                if i <= size(data, 1)
                     if obj.Station.isConnected(obj.InstrumentKeys(i))
-                        obj.StatusLamps(i).Color = obj.COLOR_LAMP_ON;
+                        data{i, 4} = sprintf('<html><div style="background:%s;color:#166534;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">已连接</div></html>', green);
+                    elseif obj.ConnectionFailed(i)
+                        data{i, 4} = sprintf('<html><div style="background:%s;color:#991b1b;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">连接失败</div></html>', red);
                     else
-                        obj.StatusLamps(i).Color = obj.COLOR_LAMP_OFF;
+                        data{i, 4} = sprintf('<html><div style="background:%s;color:#475569;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">未连接</div></html>', gray);
                     end
                 end
             end
+            obj.InstrumentTable.Data = data;
+        end
+
+        function hex = colorToHex(~, rgb)
+            hex = sprintf('#%02X%02X%02X', round(rgb * 255));
         end
 
         function updateStatusBar(obj)

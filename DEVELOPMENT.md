@@ -71,7 +71,7 @@ Figure "Measurement Device Manager" (居中，85% 屏幕)
 │   ColumnWidth: {'1.1x', '1.5x', '0.4x'}  ← 左 37% / 中 50% / 右 13%
 │
 │   ├── (1,1): leftWrapper [2×1]        ← 仪器 + 参数上下分栏，无 TabGroup
-│   │   ├── Instruments Panel (55%): [表格 + Lamp] + [Connect All | Disconnect All | Acquire All]
+│   │   ├── Instruments Panel (55%): [表格(含 Status 列)] + [Connect All | Disconnect All | Acquire All]
 │   │   └── Parameters Panel (45%): 动态参数控件 + [Apply | Acquire | Apply+Acquire | Reset]
 │   │
 │   ├── (1,2): "Live Data View" Panel
@@ -95,7 +95,7 @@ Figure "Measurement Device Manager" (居中，85% 屏幕)
 - **键盘快捷键**：Ctrl+Enter(采集) / Ctrl+S(全部保存) / Ctrl+D(Session保存) / Ctrl+C(连接所有) / Ctrl+L(清空) / Ctrl+E(ELOG上传)
 - **可折叠 ELOG 面板**：通过 `ElogToggleButton` 切换显隐，默认折叠节省空间，`ElogContentGrid` 承载全部字段
 - **HTML 按钮**：仪器表格内 Connect/Acquire 按钮用 HTML `<a>` 标签渲染在 uitable 单元格中，可随表同步滚动
-- **Lamp 状态指示灯**：仪器表格右侧 uilamp 列，绿色=已连接，灰色=未连接，黄色=采集中。首行留空补偿表头高度
+- **表格内状态列**：第 4 列 "Status" 以 HTML 彩色标签显示：绿色="已连接"，灰色="未连接"，红色="连接失败"。通过 `updateStatusColumn()` 刷新，使用 `colorToHex()` 转换 RGB 为 HTML 颜色
 - **tiledlayout 多子图**：每个仪器 key 映射一个 tile，数据自动更新到对应 tile。用 `uipanel` 包裹 `tiledlayout` 保证兼容性
 - **安全回退**：`visadev` 不可用时给出清晰提示而非崩溃
 - **动态窗口**：Figure 尺寸取屏幕 85%，居中显示，适配不同分辨率
