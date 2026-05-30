@@ -595,7 +595,6 @@ classdef MeasurementManagerApp < handle
             obj.ConnectionFailed = false(nInstruments, 1);
 
             % 表格数据（6列: Instrument, Type, IP, Status, Connect, Acquire）
-            gray = obj.colorToHex(obj.COLOR_LAMP_OFF);
             tableData = cell(nInstruments, 6);
             for i = 1:nInstruments
                 k = allKeys(i);
@@ -603,7 +602,7 @@ classdef MeasurementManagerApp < handle
                 tableData{i, 1} = char(entry.displayName);
                 tableData{i, 2} = char(entry.type);
                 tableData{i, 3} = char(entry.ip);
-                tableData{i, 4} = sprintf('<html><div style="background:%s;color:#475569;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">未连接</div></html>', gray);
+                tableData{i, 4} = '未连接';
                 tableData{i, 5} = 'Connect';
                 tableData{i, 6} = 'Acquire';
             end
@@ -1461,25 +1460,22 @@ classdef MeasurementManagerApp < handle
 
         function updateStatusColumn(obj)
             data = obj.InstrumentTable.Data;
-            green = obj.colorToHex(obj.COLOR_LAMP_ON);
-            red = obj.colorToHex(obj.COLOR_DANGER);
-            gray = obj.colorToHex(obj.COLOR_LAMP_OFF);
+            try; removeStyle(obj.InstrumentTable); catch; end
             for i = 1:numel(obj.InstrumentKeys)
-                if i <= size(data, 1)
-                    if obj.Station.isConnected(obj.InstrumentKeys(i))
-                        data{i, 4} = sprintf('<html><div style="background:%s;color:#166534;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">已连接</div></html>', green);
-                    elseif obj.ConnectionFailed(i)
-                        data{i, 4} = sprintf('<html><div style="background:%s;color:#991b1b;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">连接失败</div></html>', red);
-                    else
-                        data{i, 4} = sprintf('<html><div style="background:%s;color:#475569;text-align:center;padding:2px 6px;border-radius:3px;font-weight:bold;">未连接</div></html>', gray);
-                    end
+                if i > size(data, 1); continue; end
+                if obj.Station.isConnected(obj.InstrumentKeys(i))
+                    data{i, 4} = '已连接';
+                    s = uistyle('BackgroundColor', obj.COLOR_LAMP_ON, 'FontColor', [0.09 0.39 0.21]);
+                elseif obj.ConnectionFailed(i)
+                    data{i, 4} = '连接失败';
+                    s = uistyle('BackgroundColor', obj.COLOR_DANGER, 'FontColor', [0.6 0.11 0.11]);
+                else
+                    data{i, 4} = '未连接';
+                    s = uistyle('BackgroundColor', obj.COLOR_LAMP_OFF, 'FontColor', obj.COLOR_TEXT_SECONDARY);
                 end
+                addStyle(obj.InstrumentTable, s, 'cell', [i, 4]);
             end
             obj.InstrumentTable.Data = data;
-        end
-
-        function hex = colorToHex(~, rgb)
-            hex = sprintf('#%02X%02X%02X', round(rgb * 255));
         end
 
         function updateStatusBar(obj)
