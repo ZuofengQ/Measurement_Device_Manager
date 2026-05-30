@@ -1050,10 +1050,10 @@ classdef MeasurementManagerApp < handle
             hasPlots = keys(obj.PlotAxesMap);
             plotParent = obj.PlotTileLayout.Parent;
 
-            % 仅在 flow↔fixed 切换时需要重建 tiledlayout
+            % flow↔fixed 或有已有绘图时需重建 tiledlayout
             needRebuild = (wasFlow ~= isFlow);
-
-            if needRebuild
+            hasExistingPlots = obj.PlotAxesMap.Count > 0;
+            if needRebuild || hasExistingPlots
                 delete(obj.PlotTileLayout);
                 obj.PlotAxesMap = containers.Map();
 
@@ -1066,7 +1066,7 @@ classdef MeasurementManagerApp < handle
                 obj.PlotTileLayout.TileSpacing = 'compact';
                 title(obj.PlotTileLayout, 'Acquire data to display plots', 'FontSize', obj.FONT_SM);
             else
-                % 固定网格间切换：直接改 GridSize
+                % 无已有绘图时可直接改 GridSize
                 if ~isnan(gridRows)
                     obj.PlotTileLayout.GridSize = [gridRows, gridCols];
                 end
