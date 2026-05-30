@@ -77,6 +77,8 @@ classdef KeysightMSO9404A < labdevices.core.VisaInstrument
             runState = strtrim(obj.query(':RSTATE?'));
             wasRunning = strcmpi(runState, 'RUN');
 
+            c = onCleanup(@() obj.restoreRunState(wasRunning));
+
             obj.write(':STOP');
             obj.write(':SYSTEM:HEADER OFF');
 
@@ -160,9 +162,11 @@ classdef KeysightMSO9404A < labdevices.core.VisaInstrument
             data.xunit = 's';
             data.yunit = 'V';
             data.traces = traces;
+        end
 
+        function restoreRunState(obj, wasRunning)
             if wasRunning
-                obj.write(':RUN');
+                try; obj.write(':RUN'); catch; end
             end
         end
     end

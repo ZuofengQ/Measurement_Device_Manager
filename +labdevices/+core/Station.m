@@ -226,11 +226,10 @@ classdef Station < handle
             connected = obj.connectedKeys();
 
             % 解析每个已连接仪器的类型
+            registry = labdevices.core.InstrumentRegistry.all();
             keyTypes = cell(numel(connected), 2);
             for idx = 1:numel(connected)
                 k = connected{idx};
-                instrument = obj.Instruments(k);
-                registry = labdevices.core.InstrumentRegistry.all();
                 if isfield(registry, k)
                     keyTypes(idx, :) = {k, registry.(k).type};
                 else

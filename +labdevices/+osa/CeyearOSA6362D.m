@@ -64,6 +64,9 @@ classdef CeyearOSA6362D < labdevices.core.VisaInstrument
                 obj.write('*WAI');
             end
 
+            finalMode = p.Results.FinalSweepMode;
+            c = onCleanup(@() obj.restoreSweepMode(finalMode));
+
             modeNames = {'WRITE', 'FIX', 'MAX', 'MIN', 'RAVG', 'CALC'};
             traces = struct([]);
             for idx = 1:numel(traceNames)
@@ -97,10 +100,10 @@ classdef CeyearOSA6362D < labdevices.core.VisaInstrument
             data.xunit = 'nm';
             data.yunit = 'dBm';
             data.traces = traces;
+        end
 
-            if p.Results.Fresh
-                obj.write(sprintf(':INIT:SMODE %d', p.Results.FinalSweepMode));
-            end
+        function restoreSweepMode(obj, mode)
+            try; obj.write(sprintf(':INIT:SMODE %d', mode)); catch; end
         end
 
         function stop(obj)

@@ -993,9 +993,7 @@ classdef MeasurementManagerApp < handle
             if isa(ctrl, 'matlab.ui.control.CheckBox')
                 val = ctrl.Value;
             elseif isa(ctrl, 'matlab.ui.control.DropDown')
-                itemStr = string(ctrl.Value);
-                val = str2double(itemStr);
-                if isnan(val); val = char(itemStr); end
+                val = char(string(ctrl.Value));
             elseif isa(ctrl, 'matlab.ui.control.NumericEditField')
                 val = ctrl.Value;
             elseif isa(ctrl, 'matlab.ui.control.EditField')
@@ -1211,7 +1209,7 @@ classdef MeasurementManagerApp < handle
     methods (Access = private)
         function onBrowseFolder(obj, ~, ~)
             folder = uigetdir(obj.FolderEdit.Value, 'Select output folder');
-            if folder ~= 0
+            if ~isequal(folder, 0)
                 obj.FolderEdit.Value = folder;
                 obj.logMessage(sprintf("Output folder: %s", folder), "info");
             end
@@ -1340,17 +1338,28 @@ classdef MeasurementManagerApp < handle
             if obj.PngCheck.Value; formats{end + 1} = 'png'; end %#ok<AGROW>
             if isempty(formats); obj.logMessage("No formats selected.", "warn"); saved = struct(); return; end
 
-            uploadToElog = false;
-            elogParams = struct();
-            if obj.AutoElogCheck.Value
-                uploadToElog = true;
-                elogParams = obj.collectElogParams();
-            end
-
+            % 1. 保存文件（先不做 ELOG 上传）
             saved = labdevices.core.DataExporter.saveAcquisition(data, ...
                 'Folder', obj.resolveInstrumentSaveFolder(data), 'Formats', formats, ...
-                'UploadToElog', uploadToElog, 'ElogParams', elogParams);
+                'UploadToElog', false);
             obj.rememberSavedFiles(saved);
+
+            % 2. 自动 ELOG 上传（此时 LastSavedPaths 已包含当前文件）
+            if obj.AutoElogCheck.Value
+                try
+                    elogOpts = obj.collectElogParams();
+                    if isfield(saved, 'png') && ~isempty(saved.png)
+                        elogOpts.Attachments = {char(saved.png)};
+                    end
+                    [ok, resp] = labdevices.core.DataExporter.uploadToElog(elogOpts);
+                    if ~ok
+                        obj.logMessage(sprintf("Auto-ELOG upload failed: %s", resp), "warn");
+                    end
+                catch ME
+                    obj.logMessage(sprintf("Auto-ELOG error: %s", ME.message), "warn");
+                end
+            end
+
             if isfield(saved, 'mat')
                 obj.logMessage(sprintf("Saved: %s", saved.mat), "info");
             end
@@ -1403,6 +1412,9 @@ classdef MeasurementManagerApp < handle
     %% ======================== 回调: 生命周期 ========================
     methods (Access = private)
         function onFigureClose(obj, ~, ~)
+            if isvalid(obj.Figure)
+                obj.Figure.CloseRequestFcn = [];
+            end
             obj.delete();
         end
 
@@ -1495,8 +1507,10 @@ classdef MeasurementManagerApp < handle
         end
 
         function setBusy(obj, tf)
+            if obj.IsBusy == tf; return; end
             obj.IsBusy = tf;
             if tf
+                obj.StatusLabel.Text = regexprep(obj.StatusLabel.Text, '\s+\|\s+BUSY\.\.\.$', '');
                 obj.StatusLabel.Text = [obj.StatusLabel.Text, '  |  BUSY...'];
                 obj.StatusLabel.FontColor = obj.COLOR_WARNING;
                 drawnow;

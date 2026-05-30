@@ -65,6 +65,9 @@ classdef KeysightE5080B < labdevices.core.VisaInstrument
                 obj.write('INIT:CONT OFF');
                 obj.write('*WAI');
             end
+
+            c = onCleanup(@() obj.restoreContState(contState));
+
             obj.write('FORM ASCII');
             traces = struct([]);
 
@@ -135,9 +138,11 @@ classdef KeysightE5080B < labdevices.core.VisaInstrument
             data.xunit = 'Hz';
             data.yunit = 'varies';
             data.traces = traces;
+        end
 
-            if p.Results.Fresh && contState == 1
-                obj.write('INIT:CONT ON');
+        function restoreContState(obj, contState)
+            if contState == 1
+                try; obj.write('INIT:CONT ON'); catch; end
             end
         end
     end

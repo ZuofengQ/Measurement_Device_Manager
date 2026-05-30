@@ -81,6 +81,12 @@ classdef VisaInstrument < handle
             obj.flushAvailableBytes();
             writeline(obj.Device, char(command));
             out = strtrim(readline(obj.Device));
+            % 读取后续行（如有），合并多行响应
+            while obj.Device.NumBytesAvailable > 0
+                nextLine = strtrim(readline(obj.Device));
+                if strlength(nextLine) == 0; break; end
+                out = [out, newline, nextLine]; %#ok<AGROW>
+            end
         end
 
         function out = queryDouble(obj, command)

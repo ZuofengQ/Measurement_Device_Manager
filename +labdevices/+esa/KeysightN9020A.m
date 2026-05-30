@@ -64,6 +64,9 @@ classdef KeysightN9020A < labdevices.core.VisaInstrument
                 obj.write('INIT:IMM; *WAI');
             end
 
+            % 无论成功或失败都恢复仪器状态
+            c = onCleanup(@() obj.restoreContState(contState));
+
             traces = struct([]);
             for idx = 1:numel(traceNumbers)
                 traceNumber = traceNumbers(idx);
@@ -101,9 +104,11 @@ classdef KeysightN9020A < labdevices.core.VisaInstrument
             data.xunit = 'Hz';
             data.yunit = strtrim(obj.query('UNIT:POW?'));
             data.traces = traces;
+        end
 
-            if p.Results.Fresh && contState == 1
-                obj.write('INIT:CONT ON');
+        function restoreContState(obj, contState)
+            if contState == 1
+                try; obj.write('INIT:CONT ON'); catch; end
             end
         end
     end
