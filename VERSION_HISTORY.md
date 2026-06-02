@@ -17,6 +17,7 @@
 
 | 版本标识 | 日期 | Git 标识 | 类型 | 内容 | 备注 |
 | --- | --- | --- | --- | --- | --- |
+| v20260602-rollback-m1-layout | 2026-06-02 | tag | fix | 回退 M1 GUI 布局改动 | M1 布局导致原本可显示界面不完整，先恢复到 M1 前 GUI |
 | v20260602-m1-gui-layout | 2026-06-02 | 45d134c | ui | 稳定 Data Storage 和 ELOG Upload 布局 | 本地 tag 已创建；远端 push 受代理影响暂未完成 |
 | v20260602-version-control-baseline | 2026-06-02 | tag | docs | 建立正式工作计划和版本控制表 | 当前版本管理基线；tag 指向本文件所在提交 |
 
