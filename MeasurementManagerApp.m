@@ -161,8 +161,8 @@ classdef MeasurementManagerApp < handle
                 'Resize', 'on');
 
             obj.MainGrid = uigridlayout(obj.Figure, [3, 3]);
-            obj.MainGrid.RowHeight = {'1x', '1x', 30};
-            obj.MainGrid.ColumnWidth = {'1.1x', '1.5x', '0.4x'};
+            obj.MainGrid.RowHeight = {'0.82x', '1.18x', 30};
+            obj.MainGrid.ColumnWidth = {'1.2x', '1.4x', '0.4x'};
             obj.MainGrid.Padding = [obj.SPACE_MD, obj.SPACE_MD, obj.SPACE_MD, obj.SPACE_MD];
             obj.MainGrid.RowSpacing = obj.SPACE_SM;
             obj.MainGrid.ColumnSpacing = obj.SPACE_SM;
@@ -172,7 +172,7 @@ classdef MeasurementManagerApp < handle
             leftWrapper = uigridlayout(obj.MainGrid, [2, 1]);
             leftWrapper.Layout.Row = 1;
             leftWrapper.Layout.Column = 1;
-            leftWrapper.RowHeight = {'0.55x', '0.45x'};
+            leftWrapper.RowHeight = {'0.5x', '0.5x'};
             leftWrapper.Padding = [0, 0, 0, 0];
             leftWrapper.RowSpacing = obj.SPACE_SM;
             leftWrapper.BackgroundColor = obj.COLOR_BG;
@@ -319,7 +319,7 @@ classdef MeasurementManagerApp < handle
             obj.BottomLeftGrid = uigridlayout(obj.MainGrid, [2, 1]);
             obj.BottomLeftGrid.Layout.Row = 2;
             obj.BottomLeftGrid.Layout.Column = 1;
-            obj.BottomLeftGrid.RowHeight = {'fit', '1x'};
+            obj.BottomLeftGrid.RowHeight = {150, 'fit'};
             obj.BottomLeftGrid.RowSpacing = obj.SPACE_SM;
             obj.BottomLeftGrid.Padding = [0, 0, 0, 0];
 
@@ -444,7 +444,7 @@ classdef MeasurementManagerApp < handle
 
             % 外层: 头部栏 + 内容区
             outerGrid = uigridlayout(panel, [2, 1]);
-            outerGrid.RowHeight = {30, '1x'};
+            outerGrid.RowHeight = {32, 'fit'};
             outerGrid.Padding = [0, 0, 0, 0];
             outerGrid.RowSpacing = 0;
             outerGrid.BackgroundColor = obj.COLOR_SURFACE;
@@ -583,8 +583,10 @@ classdef MeasurementManagerApp < handle
             elogStatusLine.Layout.Row = 10;
             elogStatusLine.Layout.Column = [1, 4];
 
-            % 默认展开
-            obj.ElogCollapsed = false;
+            % Keep the upload entry visible in small windows; details can be expanded.
+            obj.ElogContentGrid.Visible = 'off';
+            obj.ElogToggleButton.Text = char(9660);  % ▼
+            obj.ElogCollapsed = true;
         end
 
         function populateInstrumentRows(obj)
@@ -1533,7 +1535,7 @@ classdef MeasurementManagerApp < handle
             config.ElogAuthors = {'Li_Yansong', 'Yang_Nianjia', 'Wu_Xinyi', 'Other'};
             config.ElogSelectedLogbook = 'EPIC';
             config.ElogSelectedAuthor = 'Li_Yansong';
-            config.ElogExecutable = 'D:\Program Files (x86)\ELOG\elog.exe';
+            config.ElogExecutable = 'E:\Program Files (x86)\ELOG\elog.exe';
             config.ElogDesign = {'SiN', 'LNOI'};
             config.ElogSelectedDesign = '';
             config.ElogWafer = '';
